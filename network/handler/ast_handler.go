@@ -4,19 +4,22 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
 // ASTHandler handles requests based on AST configuration
 type ASTHandler struct {
-	config *Http
+	config      *Http
+	chaosEngine *ChaosEngine
 }
 
 // NewASTHandler creates a new handler with AST configuration
 func NewASTHandler(config *Http) *ASTHandler {
 	return &ASTHandler{
-		config: config,
+		config:      config,
+		chaosEngine: NewChaosEngine(),
 	}
 }
 
@@ -24,26 +27,17 @@ func NewASTHandler(config *Http) *ASTHandler {
 func (h *ASTHandler) SetupRoutes(router *gin.Engine) {
 	for _, server := range h.config.Servers {
 		for i, location := range server.Location {
-			// Apply server-level chaos injection if exists
+			// Obtener configuraciones de chaos
 			serverChaos := server.ChaosInjection
-
-			// Apply location-specific chaos injection if exists
 			locationChaos := location.ChaosInjection
 
-			// Create handler for this location
+			// Crear handler para esta location
 			handler := h.createLocationHandler(location, serverChaos, locationChaos)
 
-			// Generate a meaningful path based on method and index
-			path := fmt.Sprintf("/api/%s/%d", location.Method, i)
+			// Generar ruta basada en el método y contexto
+			path := h.generateRoutePath(location, i)
 
-			// Add specific paths for common endpoints
-			if location.Method == "GET" && i == 4 { // health check
-				path = "/health"
-			} else if location.Method == "GET" && i == 3 { // get by id
-				path = "/api/posts/:id"
-			}
-
-			// Register route based on method
+			// Registrar ruta basada en el método HTTP
 			switch location.Method {
 			case "GET":
 				router.GET(path, handler)
@@ -55,9 +49,39 @@ func (h *ASTHandler) SetupRoutes(router *gin.Engine) {
 				router.DELETE(path, handler)
 			case "PATCH":
 				router.PATCH(path, handler)
+			default:
+				// Log warning para métodos no soportados
+				fmt.Printf("Warning: Unsupported HTTP method '%s' for path '%s'\n", location.Method, path)
 			}
 		}
 	}
+}
+
+// generateRoutePath genera la ruta basada en la configuración de la location
+func (h *ASTHandler) generateRoutePath(location Location, index int) string {
+	// Lógica inteligente para generar rutas basada en el contexto
+	switch {
+	case location.Method == "GET" && index == 4: // health check
+		return "/health"
+	case location.Method == "GET" && index == 3: // get by id
+		return "/api/posts/:id"
+	case location.Method == "POST" && h.isOTPEndpoint(location): // OTP endpoint
+		return "/api/v1/transaction/otp"
+	default:
+		// Generar ruta por defecto basada en método y contexto
+		return fmt.Sprintf("/api/%s/%d", location.Method, index)
+	}
+}
+
+// isOTPEndpoint verifica si es el endpoint de OTP
+func (h *ASTHandler) isOTPEndpoint(location Location) bool {
+	if location.Response == nil {
+		return false
+	}
+
+	// Convertir a string y buscar el indicador
+	responseStr := fmt.Sprintf("%v", location.Response)
+	return strings.Contains(responseStr, "OTP sent successfully")
 }
 
 // createLocationHandler creates a handler function for a specific location
@@ -87,28 +111,53 @@ func (h *ASTHandler) createLocationHandler(location Location, serverChaos, locat
 		}
 
 		// Send response
-		c.JSON(statusCode, location.Response)
+		if location.Response != nil {
+			c.JSON(statusCode, location.Response)
+		} else {
+			c.JSON(statusCode, map[string]string{"message": "No response configured"})
+		}
 	}
 }
 
 // applyChaosInjection applies chaos engineering features
 func (h *ASTHandler) applyChaosInjection(c *gin.Context, chaos *ChaosInjection) {
-	// TODO: Implementar funcionalidad de chaos engineering
-	// Por ahora solo se registra que debe implementarse
+	if chaos == nil {
+		return
+	}
 
+	// Aplicar latencia si está configurada
 	if chaos.Latency != "" {
-		// TODO: Implementar inyección de latencia basada en string
-		// Parsear el string de latencia (ej: "100ms 30%")
+		h.chaosEngine.ApplyLatency(chaos.Latency)
 	}
 
-	if chaos.Abort != "" {
-		// TODO: Implementar inyección de abort basada en string
-		// Parsear el string de abort (ej: "503 10%")
+	// Verificar si debe abortar la request
+	if chaos.Abort != "" && h.chaosEngine.ShouldAbort(chaos.Abort) {
+		// Extraer código de estado del string de abort (ej: "503 10%" -> 503)
+		parts := strings.Fields(chaos.Abort)
+		if len(parts) > 0 {
+			if abortCode, err := strconv.Atoi(parts[0]); err == nil {
+				c.AbortWithStatus(abortCode)
+				return
+			}
+		}
+		// Fallback a 503 si no se puede parsear
+		c.AbortWithStatus(503)
+		return
 	}
 
-	if chaos.Error != "" {
-		// TODO: Implementar inyección de error basada en string
-		// Parsear el string de error (ej: "500 5%")
+	// Verificar si debe retornar error
+	if chaos.Error != "" && h.chaosEngine.ShouldReturnError(chaos.Error) {
+		// Extraer código de estado del string de error (ej: "500 5%" -> 500)
+		parts := strings.Fields(chaos.Error)
+		if len(parts) > 0 {
+			if errorCode, err := strconv.Atoi(parts[0]); err == nil {
+				c.AbortWithStatus(errorCode)
+				return
+			}
+		}
+		// Fallback a 500 si no se puede parsear
+		c.AbortWithStatus(500)
+		return
 	}
 }
 
@@ -118,14 +167,8 @@ func (h *ASTHandler) determineStatusCode(statusCode string) int {
 		return http.StatusOK
 	}
 
-	// TODO: Parsear el string de statusCode (ej: "200 80% 500 20%")
-	// Por ahora, intentar convertir a int directamente
-	if code, err := strconv.Atoi(statusCode); err == nil {
-		return code
-	}
-
-	// Si no se puede parsear, devolver 200 por defecto
-	return http.StatusOK
+	// Usar el motor de chaos para determinar el status code
+	return h.chaosEngine.GetStatusCode(statusCode)
 }
 
 // handleAsyncRequest handles asynchronous requests

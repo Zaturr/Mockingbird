@@ -1,160 +1,143 @@
-# 🧪 **Guía de Pruebas - Servidor AST**
+# Testing del Sistema Mockingbird
 
-## 🚀 **Configuración Actual**
+## 🚀 Iniciar el Servidor
 
-### **Puertos de Servicios:**
-- **Jsonplaceholder**: Puerto 8080
-- **Sypago**: Puerto 8081
-
-## 📡 **Endpoints Disponibles para Pruebas**
-
-### **1. Jsonplaceholder (Puerto 8080)**
-
-#### **POST Endpoints:**
 ```bash
+# Compilar el proyecto
+go build
+
+# Ejecutar el servidor
+go run main.go
+```
+
+## 📋 Servicios Disponibles
+
+### 1. JSONPlaceholder (Puerto 8080)
+- **GET** `/health` - Health check
+- **GET** `/api/posts/:id` - Obtener post por ID
+- **GET** `/api/GET/4` - Chaos test endpoint
+- **POST** `/api/POST/0` - Crear post
+- **POST** `/api/POST/1` - Crear usuario
+- **POST** `/api/POST/2` - Crear comentario
+- **PUT** `/api/PUT/0` - Actualizar post
+- **DELETE** `/api/DELETE/0` - Eliminar post
+
+### 2. Sypago (Puerto 8081)
+- **GET** `/health` - Health check
+- **POST** `/api/POST/0` - Procesar pago
+- **POST** `/api/POST/1` - Crear transacción
+- **POST** `/api/v1/transaction/otp` - Enviar OTP para transacción
+- **PUT** `/api/PUT/0` - Actualizar pago
+- **DELETE** `/api/DELETE/0` - Cancelar transacción
+
+### 3. Users (Puerto 8082) - Nuevo Servicio
+- **GET** `/health` - Health check
+- **GET** `/api/GET/0` - Obtener perfil de usuario
+- **POST** `/api/POST/0` - Registrar usuario
+- **PUT** `/api/PUT/0` - Actualizar perfil
+- **DELETE** `/api/DELETE/0` - Eliminar cuenta
+
+## 🧪 Probar Endpoints
+
+### Con curl:
+
+```bash
+# Health check de JSONPlaceholder
+curl http://localhost:8080/health
+
 # Crear un post
-curl -X POST http://localhost:8080/api/jsonplaceholder/posts \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Test Post", "body": "Test content"}'
+curl -X POST http://localhost:8080/api/POST/0
 
-# Crear un usuario
-curl -X POST http://localhost:8080/api/jsonplaceholder/users \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Test User", "email": "test@example.com"}'
+# Obtener perfil de usuario
+curl http://localhost:8082/api/GET/0
 
-# Crear un comentario
-curl -X POST http://localhost:8080/api/jsonplaceholder/comments \
-  -H "Content-Type: application/json" \
-  -d '{"postId": 1, "body": "Test comment"}'
-```
-
-#### **GET Endpoints:**
-```bash
-# Health check
-curl http://localhost:8080/api/jsonplaceholder/health
-
-# Obtener post por ID
-curl http://localhost:8080/api/jsonplaceholder/posts/1
-
-# Endpoint de prueba de chaos engineering
-curl http://localhost:8080/api/jsonplaceholder/chaos-test
-```
-
-### **2. Sypago (Puerto 8081)**
-
-#### **POST Endpoints:**
-```bash
 # Procesar pago
-curl -X POST http://localhost:8081/api/sypago/payments \
-  -H "Content-Type: application/json" \
-  -d '{"amount": 100.00, "currency": "USD"}'
-
-# Crear transacción
-curl -X POST http://localhost:8081/api/sypago/transactions \
-  -H "Content-Type: application/json" \
-  -d '{"paymentId": 1, "amount": 100.00}'
+curl -X POST http://localhost:8081/api/POST/0
 ```
 
-#### **GET Endpoints:**
+### Con Postman:
+
+1. **JSONPlaceholder Service**
+   - Base URL: `http://localhost:8080`
+   - Endpoints: Ver lista arriba
+
+2. **Sypago Service**
+   - Base URL: `http://localhost:8081`
+   - Endpoints: Ver lista arriba
+
+3. **Users Service**
+   - Base URL: `http://localhost:8082`
+   - Endpoints: Ver lista arriba
+
+## 🎯 Testing de Chaos Engineering
+
+El endpoint de chaos test en JSONPlaceholder incluye:
+- **Latencia**: 100ms en 30% de requests
+- **Abort**: Error 503 en 10% de requests
+- **Error**: Error 500 en 5% de requests
+
 ```bash
-# Health check
-curl http://localhost:8081/api/sypago/health
+# Probar chaos test (puede fallar aleatoriamente)
+curl http://localhost:8080/api/GET/4
 ```
 
-## 🔍 **Características a Verificar**
+## 🔧 Agregar Nuevos Endpoints
 
-### **1. Respuestas Personalizadas por Servicio**
-- Cada servicio responde con su nombre en la respuesta
-- Headers personalizados configurados
-- Códigos de estado según configuración
+### 1. Editar `infraestructura/config/endpoints.go`
+### 2. Agregar nuevo endpoint en la función correspondiente
+### 3. Reiniciar el servidor
 
-### **2. Chaos Engineering (Estructura)**
-- Endpoint `/chaos-test` tiene configuración de chaos
-- 30% probabilidad de latencia (100ms - 1000ms)
-- 10% probabilidad de abort con código 503
-- 80% probabilidad de respuesta 200, 20% de 500
+Ejemplo de nuevo endpoint:
 
-### **3. Múltiples Servidores Independientes**
-- Jsonplaceholder en puerto 8080
-- Sypago en puerto 8081
-- Cada uno con su propia configuración AST
-
-## 🧪 **Pasos para Probar**
-
-### **1. Iniciar el Servidor**
-```bash
-./server.exe
-```
-
-### **2. Verificar que Ambos Servicios Estén Funcionando**
-```bash
-# Verificar Jsonplaceholder
-curl http://localhost:8080/api/jsonplaceholder/health
-
-# Verificar Sypago
-curl http://localhost:8081/api/sypago/health
-```
-
-### **3. Probar Endpoints POST**
-```bash
-# Probar creación en Jsonplaceholder
-curl -X POST http://localhost:8080/api/jsonplaceholder/posts \
-  -H "Content-Type: application/json" \
-  -d '{"test": "data"}'
-```
-
-### **4. Probar Endpoints GET**
-```bash
-# Probar health checks
-curl http://localhost:8080/api/jsonplaceholder/health
-curl http://localhost:8081/api/sypago/health
-```
-
-## 📊 **Respuestas Esperadas**
-
-### **Jsonplaceholder Health:**
-```json
+```go
 {
-  "status": "Jsonplaceholder service is healthy",
-  "port": 8080
-}
+    Method:     "GET",
+    Response:   map[string]interface{}{"message": "Nuevo endpoint", "service": "jsonplaceholder"},
+    Headers:    &handler.Headers{"Content-Type": "application/json"},
+    StatusCode: "200",
+},
 ```
 
-### **Sypago Health:**
-```json
-{
-  "status": "Sypago service is healthy",
-  "port": 8081
-}
-```
+## 📊 Monitoreo
 
-### **Posts Creados:**
-```json
-{
-  "message": "Post created successfully",
-  "service": "jsonplaceholder"
-}
-```
-
-## ⚠️ **Notas Importantes**
-
-1. **Chaos Engineering**: Por ahora solo está la estructura, no la funcionalidad
-2. **Puertos**: Asegúrate de que los puertos 8080 y 8081 estén disponibles
-3. **Variables de Entorno**: Puedes modificar los puertos en el archivo `.env`
-4. **Logs**: El servidor mostrará en qué puerto se inicia cada servicio
-
-## 🔧 **Solución de Problemas**
-
-### **Puerto en Uso:**
+### Logs del Servidor:
 ```bash
-# Cambiar puerto en .env
-JSONPLACEHOLDER_PORT=9090
-SYPAGO_PORT=9091
+# Ver logs en tiempo real
+go run main.go 2>&1 | tee server.log
 ```
 
-### **Verificar Servicios:**
+### Verificar Puertos:
 ```bash
-# Ver qué puertos están en uso
-netstat -an | findstr :8080
-netstat -an | findstr :8081
+# Verificar que los servicios estén corriendo
+netstat -an | grep :808
+# o en Windows:
+netstat -an | findstr :808
 ```
+
+## 🚨 Troubleshooting
+
+### Puerto ya en uso:
+```bash
+# En Windows
+netstat -ano | findstr :8080
+taskkill /PID <PID> /F
+
+# En Linux/Mac
+lsof -i :8080
+kill -9 <PID>
+```
+
+### Error de compilación:
+```bash
+# Limpiar y reinstalar dependencias
+go clean -modcache
+go mod tidy
+go build
+```
+
+## 📝 Notas Importantes
+
+- Todos los servicios se inician automáticamente
+- Los cambios en la configuración requieren reiniciar el servidor
+- Cada servicio tiene su propio puerto y configuración
+- El sistema es completamente centralizado en `infraestructura/config/endpoints.go`

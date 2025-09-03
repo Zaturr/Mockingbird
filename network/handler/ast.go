@@ -16,8 +16,8 @@ type Server struct {
 
 type Location struct {
 	Method         string
-	Body           interface{}
-	Response       interface{}
+	Body           Body
+	Response       Response
 	Async          *Async
 	Headers        *Headers
 	StatusCode     string
@@ -26,7 +26,7 @@ type Location struct {
 
 type Async struct {
 	Url        string
-	Body       interface{}
+	Body       *Body
 	Method     string
 	Headers    *Headers
 	Timeout    *string
@@ -34,10 +34,14 @@ type Async struct {
 	RetryDelay *string
 }
 
-type Headers map[string]string
-
 type ChaosInjection struct {
 	Latency string
 	Abort   string
 	Error   string
 }
+
+type Headers map[string]string
+
+type Body interface{}
+
+type Response interface{}
