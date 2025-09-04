@@ -29,7 +29,7 @@ func NewServiceServer(name, port string) *ServiceServer {
 	// Obtener configuración desde el archivo centralizado
 	serviceConfig := config.GetServiceEndpoints(name)
 
-	astHandler := handler.NewASTHandler(serviceConfig)
+	astHandler := handler.NewExternalHandler(serviceConfig)
 
 	server := &ServiceServer{
 		router:     router,
@@ -39,7 +39,7 @@ func NewServiceServer(name, port string) *ServiceServer {
 	}
 
 	// Configurar rutas usando AST específico del servicio
-	astHandler.SetupRoutes(router)
+	astHandler.SetupExternalRoutes(router)
 
 	return server
 }
