@@ -5,17 +5,16 @@ import (
 	"os"
 	"sync"
 
-	"Mockingbird/infraestructura/config"
 	"Mockingbird/network/handler"
 
 	"github.com/gin-gonic/gin"
 )
 
 type ServiceServer struct {
-	router     *gin.Engine
-	port       string
-	name       string
-	astHandler *handler.ASTHandler
+	router          *gin.Engine
+	port            string
+	name            string
+	externalHandler *handler.ExternalHandler
 }
 
 type MultiPortServer struct {
@@ -26,20 +25,18 @@ func NewServiceServer(name, port string) *ServiceServer {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
 
-	// Obtener configuración desde el archivo centralizado
-	serviceConfig := config.GetServiceEndpoints(name)
-
-	astHandler := handler.NewExternalHandler(serviceConfig)
+	// Crear el handler externo que maneja el mapeo de JSON
+	externalHandler := handler.NewExternalHandler()
 
 	server := &ServiceServer{
-		router:     router,
-		port:       port,
-		name:       name,
-		astHandler: astHandler,
+		router:          router,
+		port:            port,
+		name:            name,
+		externalHandler: externalHandler,
 	}
 
-	// Configurar rutas usando AST específico del servicio
-	astHandler.SetupExternalRoutes(router)
+	// Configurar rutas usando el handler externo
+	externalHandler.SetupExternalRoutes(router)
 
 	return server
 }

@@ -8,6 +8,7 @@ type Http struct {
 }
 
 type Server struct {
+	Path           string
 	Listen         int
 	Logger         *bool
 	ChaosInjection *ChaosInjection
@@ -16,8 +17,8 @@ type Server struct {
 
 type Location struct {
 	Method         string
-	Body           Body
-	Response       Response
+	Body           *Body
+	Response       *Response
 	Async          *Async
 	Headers        *Headers
 	StatusCode     string
