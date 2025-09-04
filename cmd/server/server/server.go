@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"Mockingbird/network/handler"
+	"Mockingbird/routes"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,8 +36,8 @@ func NewServiceServer(name, port string) *ServiceServer {
 		externalHandler: externalHandler,
 	}
 
-	// Configurar rutas usando el handler externo
-	externalHandler.SetupExternalRoutes(router)
+	// Configurar rutas usando la carpeta de rutas
+	routes.SetupExternalRoutes(router, externalHandler)
 
 	return server
 }
