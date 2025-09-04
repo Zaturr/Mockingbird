@@ -52,12 +52,14 @@ func Multiport() *MultiPortServer {
 	jsonplaceholderPort := getEnv("JSONPLACEHOLDER_PORT", "8080")
 	sypagoPort := getEnv("SYPAGO_PORT", "8081")
 	usersPort := getEnv("USERS_PORT", "9090")
+	prueba := getEnv("prueba", "8084")
 
 	return &MultiPortServer{
 		services: []*ServiceServer{
 			NewServiceServer("jsonplaceholder", jsonplaceholderPort),
 			NewServiceServer("sypago", sypagoPort),
 			NewServiceServer("users", usersPort),
+			NewServiceServer("Prueba", prueba),
 		},
 	}
 }

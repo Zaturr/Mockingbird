@@ -4,41 +4,41 @@ package models
 // Estructura exacta según especificación del usuario
 
 type Http struct {
-	Servers []Server
+	Servers []Server `json:"servers"`
 }
 
 type Server struct {
-	Path           string
-	Listen         int
-	Logger         *bool
-	ChaosInjection *ChaosInjection
-	Location       []Location
+	Path           string          `json:"path"`
+	Listen         int             `json:"listen"`
+	Logger         *bool           `json:"logger"`
+	ChaosInjection *ChaosInjection `json:"chaosInjection"`
+	Location       []Location      `json:"location"`
 }
 
 type Location struct {
-	Method         string
-	Body           *Body
-	Response       *Response
-	Async          *Async
-	Headers        *Headers
-	StatusCode     string
-	ChaosInjection *ChaosInjection
+	Method         string          `json:"method"`
+	Body           *Body           `json:"body"`
+	Response       *Response       `json:"response"`
+	Async          *Async          `json:"async,omitempty"`
+	Headers        *Headers        `json:"headers"`
+	StatusCode     string          `json:"statusCode"`
+	ChaosInjection *ChaosInjection `json:"chaosInjection"`
 }
 
 type Async struct {
-	Url        string
-	Body       *Body
-	Method     string
-	Headers    *Headers
-	Timeout    *string
-	Retries    *int
-	RetryDelay *string
+	Url        string   `json:"url"`
+	Body       *Body    `json:"body"`
+	Method     string   `json:"method"`
+	Headers    *Headers `json:"headers"`
+	Timeout    *string  `json:"timeout"`
+	Retries    *int     `json:"retries"`
+	RetryDelay *string  `json:"retryDelay"`
 }
 
 type ChaosInjection struct {
-	Latency string
-	Abort   string
-	Error   string
+	Latency string `json:"latency"`
+	Abort   string `json:"abort"`
+	Error   string `json:"error"`
 }
 
 type Headers map[string]string

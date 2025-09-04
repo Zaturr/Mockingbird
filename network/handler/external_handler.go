@@ -1,22 +1,16 @@
 package handler
 
 import (
-	"Mockingbird/chaos"
 	"Mockingbird/models"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-type ExternalHandler struct {
-	chaosEngine *chaos.ChaosEngine
-}
+type ExternalHandler struct{}
 
 func NewExternalHandler() *ExternalHandler {
-	return &ExternalHandler{
-		chaosEngine: chaos.NewChaosEngine(),
-	}
+	return &ExternalHandler{}
 }
 
 func (h *ExternalHandler) HandleConfigMapping(c *gin.Context) {
@@ -28,14 +22,6 @@ func (h *ExternalHandler) HandleConfigMapping(c *gin.Context) {
 	}
 
 	mappedConfig := h.mapJSONToStruct(requestBody)
-
-	// Aplicar inyección de caos después del mapeo
-	h.applyChaosInjection(c, mappedConfig)
-
-	// Si el contexto fue abortado por el caos, no continuar
-	if c.IsAborted() {
-		return
-	}
 
 	serverPort := h.findServerPort(requestBody, mappedConfig)
 
@@ -224,84 +210,4 @@ func (h *ExternalHandler) mapLocation(locationData map[string]interface{}) model
 	}
 
 	return location
-}
-
-// applyChaosInjection aplica la inyección de caos basada en la configuración mapeada
-func (h *ExternalHandler) applyChaosInjection(c *gin.Context, config *models.Http) {
-	// Buscar configuración de caos en todos los servidores
-	for _, server := range config.Servers {
-		// Aplicar caos del servidor si existe
-		if server.ChaosInjection != nil {
-			h.applyServerChaos(c, server.ChaosInjection)
-			if c.IsAborted() { // Si el caos a nivel de servidor aborta, no continuar
-				return
-			}
-		}
-
-		// Aplicar caos de las locations si existe
-		for _, location := range server.Location {
-			if location.ChaosInjection != nil {
-				h.applyLocationChaos(c, location.ChaosInjection)
-				if c.IsAborted() { // Si el caos a nivel de location aborta, no continuar
-					return
-				}
-			}
-		}
-	}
-}
-
-// applyServerChaos aplica caos a nivel de servidor
-func (h *ExternalHandler) applyServerChaos(c *gin.Context, chaosConfig *models.ChaosInjection) {
-	// Aplicar latency
-	if chaosConfig.Latency != "" {
-		if latency := h.chaosEngine.ApplyLatency(chaosConfig.Latency); latency > 0 {
-			time.Sleep(latency)
-		}
-	}
-
-	// Aplicar abort
-	if chaosConfig.Abort != "" {
-		if statusCode := h.chaosEngine.ApplyAbort(chaosConfig.Abort); statusCode > 0 {
-			c.JSON(statusCode, gin.H{"error": "Chaos injection: abort triggered"})
-			c.Abort()
-			return
-		}
-	}
-
-	// Aplicar error
-	if chaosConfig.Error != "" {
-		if statusCode := h.chaosEngine.ApplyError(chaosConfig.Error); statusCode > 0 {
-			c.JSON(statusCode, gin.H{"error": "Chaos injection: error triggered"})
-			c.Abort()
-			return
-		}
-	}
-}
-
-// applyLocationChaos aplica caos a nivel de location
-func (h *ExternalHandler) applyLocationChaos(c *gin.Context, chaosConfig *models.ChaosInjection) {
-	// Aplicar latency
-	if chaosConfig.Latency != "" {
-		if latency := h.chaosEngine.ApplyLatency(chaosConfig.Latency); latency > 0 {
-			time.Sleep(latency)
-		}
-	}
-
-	// Aplicar abort
-	if chaosConfig.Abort != "" {
-		if statusCode := h.chaosEngine.ApplyAbort(chaosConfig.Abort); statusCode > 0 {
-			c.JSON(statusCode, gin.H{"error": "Chaos injection: abort triggered"})
-			c.Abort()
-			return
-		}
-	}
-
-	// Aplicar error
-	if chaosConfig.Error != "" {
-		if statusCode := h.chaosEngine.ApplyError(chaosConfig.Error); statusCode > 0 {
-			c.JSON(statusCode, gin.H{"error": "Chaos injection: error triggered"})
-			c.Abort()
-			return
-		}
-	}
 }
