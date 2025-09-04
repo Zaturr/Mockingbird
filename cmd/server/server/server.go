@@ -46,11 +46,11 @@ func (s *ServiceServer) Start() error {
 	return s.router.Run(":" + s.port)
 }
 
-func NewMultiPortServer() *MultiPortServer {
+func Multiport() *MultiPortServer {
 	// Obtener puertos desde variables de entorno o usar valores por defecto
 	jsonplaceholderPort := getEnv("JSONPLACEHOLDER_PORT", "8080")
 	sypagoPort := getEnv("SYPAGO_PORT", "8081")
-	usersPort := getEnv("USERS_PORT", "8082")
+	usersPort := getEnv("USERS_PORT", "9090")
 
 	return &MultiPortServer{
 		services: []*ServiceServer{
