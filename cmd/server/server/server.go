@@ -38,6 +38,7 @@ func NewServiceServer(name, port string) *ServiceServer {
 
 	// Configurar rutas usando la carpeta de rutas
 	routes.SetupExternalRoutes(router, externalHandler)
+	routes.SetupCaso1Routes(router)
 
 	return server
 }

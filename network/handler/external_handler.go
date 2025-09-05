@@ -133,14 +133,18 @@ func (h *ExternalHandler) mapLocation(locationData map[string]interface{}) model
 		location.Method = method
 	}
 
-	if bodyData, ok := locationData["body"]; ok {
-		body := models.Body(bodyData)
-		location.Body = &body
+	if schemaData, ok := locationData["schema"]; ok {
+		if schemaBytes, ok := schemaData.([]byte); ok {
+			schema := models.Schema(schemaBytes)
+			location.Schema = &schema
+		}
 	}
 
 	if responseData, ok := locationData["response"]; ok {
-		response := models.Response(responseData)
-		location.Response = &response
+		if responseBytes, ok := responseData.([]byte); ok {
+			response := models.Response(responseBytes)
+			location.Response = &response
+		}
 	}
 
 	if asyncData, ok := locationData["async"].(map[string]interface{}); ok {
@@ -152,8 +156,10 @@ func (h *ExternalHandler) mapLocation(locationData map[string]interface{}) model
 			async.Method = method
 		}
 		if body, ok := asyncData["body"]; ok {
-			bodyMap := models.Body(body)
-			async.Body = &bodyMap
+			if bodyBytes, ok := body.([]byte); ok {
+				bodyMap := models.Body(bodyBytes)
+				async.Body = &bodyMap
+			}
 		}
 		if headers, ok := asyncData["headers"]; ok {
 			headersMap := make(models.Headers)

@@ -12,9 +12,9 @@ func SetupExternalRoutes(router *gin.Engine, externalHandler *handler.ExternalHa
 	router.POST("/api/config", externalHandler.HandleConfigMapping)
 }
 
-// SetupCaso1Routes configura las rutas para el caso1
 func SetupCaso1Routes(router *gin.Engine) {
-	router.POST("/api/mock", func(c *gin.Context) {
+	// Configurar ruta para cualquier método HTTP
+	router.Any("/api/mock", func(c *gin.Context) {
 		externa.MockHandler(c.Writer, c.Request)
 	})
 }

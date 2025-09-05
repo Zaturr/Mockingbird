@@ -17,7 +17,7 @@ type Server struct {
 
 type Location struct {
 	Method         string          `json:"method"`
-	Body           *Body           `json:"body"`
+	Schema         *Schema         `json:"Schema"`
 	Response       *Response       `json:"response"`
 	Async          *Async          `json:"async,omitempty"`
 	Headers        *Headers        `json:"headers"`
@@ -43,6 +43,7 @@ type ChaosInjection struct {
 
 type Headers map[string]string
 
-type Body interface{}
+type Body []byte
+type Schema []byte
 
-type Response interface{}
+type Response []byte
