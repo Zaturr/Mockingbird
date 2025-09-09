@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"Catalyst/internal/models"
+	"mockingbird/internal/models"
 )
 
 // Engine manages chaos injection in HTTP responses

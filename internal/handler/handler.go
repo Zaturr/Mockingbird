@@ -9,9 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"Catalyst/internal/chaos"
-	"Catalyst/internal/models"
+	"mockingbird/internal/chaos"
+	"mockingbird/internal/models"
+
+	"github.com/Orlandoiii/logger"
+	"github.com/SOLUCIONESSYCOM/scribe"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -31,13 +35,28 @@ func NewHandler() *Handler {
 
 // RegisterLocation registers a location with the handler
 func (h *Handler) RegisterLocation(location models.Location) error {
+	logger.Info().
+		Str("path", location.Path).
+		Str("method", location.Method).
+		Int("status_code", location.StatusCode).
+		Msg("Registering location")
+
 	// If schema is provided, compile it
 	if location.Schema != "" {
 		schema, err := h.compileSchema(location.Schema)
 		if err != nil {
+			logger.Error().
+				Str("path", location.Path).
+				Str("method", location.Method).
+				AnErr("error", err).
+				Msg("Error compiling schema for location")
 			return fmt.Errorf("error compiling schema for path %s: %w", location.Path, err)
 		}
 		h.schemas[location.Path+":"+location.Method] = schema
+		logger.Debug().
+			Str("path", location.Path).
+			Str("method", location.Method).
+			Msg("Schema compiled successfully for location")
 	}
 
 	return nil
@@ -47,8 +66,14 @@ func (h *Handler) RegisterLocation(location models.Location) error {
 func (h *Handler) compileSchema(schemaStr string) (*jsonschema.Schema, error) {
 	compiler := jsonschema.NewCompiler()
 
-	// Add the schema to the compiler
-	if err := compiler.AddResource("schema.json", strings.NewReader(schemaStr)); err != nil {
+	// Parse the schema string as JSON first
+	var schemaData interface{}
+	if err := json.Unmarshal([]byte(schemaStr), &schemaData); err != nil {
+		return nil, fmt.Errorf("error parsing schema JSON: %w", err)
+	}
+
+	// Add the schema to the compiler using the parsed data
+	if err := compiler.AddResource("schema.json", schemaData); err != nil {
 		return nil, fmt.Errorf("error adding schema resource: %w", err)
 	}
 
@@ -63,9 +88,22 @@ func (h *Handler) compileSchema(schemaStr string) (*jsonschema.Schema, error) {
 
 // HandleRequest handles an HTTP request based on the location configuration
 func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
+	ctx := c.Request.Context()
+	lc := scribe.GetLogContext(ctx)
+	lc.Set("request_id", uuid.New().String())
+	lc.Set("location_path", location.Path)
+	lc.Set("location_method", location.Method)
+
+	scribe.DebugWithCtx(ctx).
+		Str("method", c.Request.Method).
+		Str("path", c.Request.URL.Path).
+		Str("ip", c.ClientIP()).
+		Msg("Handling request")
+
 	// Apply chaos injection if configured
 	if location.ChaosInjection != nil {
 		if h.chaosEngine.ApplyChaos(c.Writer, location.ChaosInjection) {
+			scribe.WarnWithCtx(ctx).Msg("Request aborted by chaos injection")
 			return // Request was aborted by chaos injection
 		}
 	}
@@ -73,6 +111,7 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 	// Validate request body against schema if configured
 	if schema, ok := h.schemas[location.Path+":"+location.Method]; ok {
 		if err := h.validateRequestBody(c, schema); err != nil {
+			scribe.ErrorWithCtx(ctx).AnErr("validation_error", err).Msg("Schema validation failed")
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Schema validation failed: %v", err)})
 			return
 		}
@@ -87,6 +126,10 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 
 	// Handle async call if configured
 	if location.Async != nil {
+		scribe.InfoWithCtx(ctx).
+			Str("async_url", location.Async.Url).
+			Str("async_method", location.Async.Method).
+			Msg("Starting async call")
 		go h.handleAsyncCall(location.Async)
 	}
 
@@ -98,14 +141,23 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 		c.Header("Content-Type", "application/json")
 		c.String(location.StatusCode, location.Response)
 	}
+
+	scribe.InfoWithCtx(ctx).
+		Int("status_code", location.StatusCode).
+		Msg("Request completed successfully")
 }
 
 // validateRequestBody validates the request body against a JSON schema
 func (h *Handler) validateRequestBody(c *gin.Context, schema *jsonschema.Schema) error {
+	ctx := c.Request.Context()
+
+	scribe.DebugWithCtx(ctx).Msg("Starting request body validation")
+
 	// Read the request body
 	body, err := io.ReadAll(c.Request.Body)
 
 	if err != nil {
+		scribe.ErrorWithCtx(ctx).AnErr("error", err).Msg("Error reading request body")
 		return fmt.Errorf("error reading request body: %w", err)
 	}
 
@@ -117,19 +169,28 @@ func (h *Handler) validateRequestBody(c *gin.Context, schema *jsonschema.Schema)
 	// Parse the JSON
 	var data interface{}
 	if err := json.Unmarshal(body, &data); err != nil {
+		scribe.ErrorWithCtx(ctx).AnErr("error", err).Msg("Error parsing JSON")
 		return fmt.Errorf("error parsing JSON: %w", err)
 	}
 
 	// Validate against the schema
 	if err := schema.Validate(data); err != nil {
+		scribe.ErrorWithCtx(ctx).AnErr("validation_error", err).Msg("Schema validation failed")
 		return err
 	}
+
+	scribe.DebugWithCtx(ctx).Msg("Request body validation successful")
 
 	return nil
 }
 
 // handleAsyncCall handles an asynchronous HTTP call
 func (h *Handler) handleAsyncCall(async *models.Async) {
+	logger.Debug().
+		Str("url", async.Url).
+		Str("method", async.Method).
+		Msg("Creating async HTTP request")
+
 	// Create HTTP client with timeout
 	client := &http.Client{}
 	if async.Timeout != nil {
@@ -144,7 +205,11 @@ func (h *Handler) handleAsyncCall(async *models.Async) {
 
 	req, err := http.NewRequest(async.Method, async.Url, body)
 	if err != nil {
-		fmt.Printf("Error creating async request: %v\n", err)
+		logger.Error().
+			Str("url", async.Url).
+			Str("method", async.Method).
+			AnErr("error", err).
+			Msg("Error creating async request")
 		return
 	}
 
@@ -180,17 +245,33 @@ func (h *Handler) handleAsyncCall(async *models.Async) {
 		}
 
 		if i < retries-1 {
+			logger.Warn().
+				Str("url", async.Url).
+				Int("attempt", i+1).
+				Int("max_retries", retries-1).
+				AnErr("error", lastErr).
+				Msg("Async request failed, retrying")
 			time.Sleep(time.Duration(retryDelay) * time.Millisecond)
 		}
 	}
 
 	// Handle response
 	if lastErr != nil {
-		fmt.Printf("Error executing async request after %d retries: %v\n", retries-1, lastErr)
+		logger.Error().
+			Str("url", async.Url).
+			Str("method", async.Method).
+			Int("retries", retries-1).
+			AnErr("error", lastErr).
+			Msg("Error executing async request after retries")
 		return
 	}
 	defer resp.Body.Close()
 
 	// Log response status
-	fmt.Printf("Async request completed with status: %s\n", resp.Status)
+	logger.Info().
+		Str("url", async.Url).
+		Str("method", async.Method).
+		Str("status", resp.Status).
+		Int("status_code", resp.StatusCode).
+		Msg("Async request completed successfully")
 }

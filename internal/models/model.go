@@ -57,3 +57,21 @@ type Error struct {
 	Code        int    `yaml:"code" json:"code"`
 	Probability string `yaml:"probability" json:"probability"`
 }
+
+type LogSettings struct {
+	Console           bool   `yaml:"console"`
+	BeutifyConsoleLog bool   `yaml:"beautify_console"`
+	File              bool   `yaml:"file"`
+	Path              string `yaml:"path"`
+	MinLevel          string `yaml:"min_level"`
+	RotationMaxSizeMB int    `yaml:"rotation_max_size_mb"`
+	MaxAgeDay         int    `yaml:"max_age_day"`
+	MaxBackups        int    `yaml:"max_backups"`
+	Compress          bool   `yaml:"compress"`
+}
+
+type Config struct {
+	Http        Http        `yaml:"http"`
+	LogSettings LogSettings `yaml:"log_settings"`
+	Server      Server      `yaml:"server"`
+}

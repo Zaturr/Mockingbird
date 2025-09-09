@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"Catalyst/internal/models"
+	"mockingbird/internal/models"
 )
 
 func TestCreateServer(t *testing.T) {

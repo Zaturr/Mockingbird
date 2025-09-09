@@ -9,8 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"Catalyst/internal/handler"
-	"Catalyst/internal/models"
+	"mockingbird/internal/handler"
+	"mockingbird/internal/models"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -62,7 +63,7 @@ func (m *Manager) CreateServer(config models.Server) error {
 
 	// Create Gin router
 	router := gin.New()
-	
+
 	// Add middleware
 	router.Use(gin.Recovery())
 	if config.Logger != nil && *config.Logger {

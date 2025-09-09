@@ -6,7 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"Catalyst/internal/models"
+	"mockingbird/internal/models"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -124,4 +125,19 @@ func GetConfigDir() string {
 
 	// Default to ./config
 	return "./config"
+}
+
+// GetLogSettings returns the default logging configuration
+func GetLogSettings() *models.LogSettings {
+	return &models.LogSettings{
+		Console:           true,
+		BeutifyConsoleLog: true,
+		File:              true,
+		Path:              "./logs/mockingbird.log",
+		MinLevel:          "info",
+		RotationMaxSizeMB: 100,
+		MaxAgeDay:         30,
+		MaxBackups:        5,
+		Compress:          true,
+	}
 }

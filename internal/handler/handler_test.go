@@ -6,7 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"Catalyst/internal/models"
+	"mockingbird/internal/models"
+
 	"github.com/gin-gonic/gin"
 )
 

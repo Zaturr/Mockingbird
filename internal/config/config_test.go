@@ -3,9 +3,10 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"Catalyst/internal/models"
+	"mockingbird/internal/models"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -22,6 +23,18 @@ func TestLoadConfig(t *testing.T) {
         - path: /api/test
           method: GET
           response: '{"test": true}'
+          status_code: 200
+        - path: /api/echo
+          method: POST
+          schema: |
+            {
+              "type": "object",
+              "properties": {
+                "message": { "type": "string" }
+              },
+              "required": ["message"]
+            }
+          response: '{"echo": "{{.message}}"}'
           status_code: 200
 `
 
@@ -54,25 +67,60 @@ func TestLoadConfig(t *testing.T) {
 		t.Errorf("Expected logger to be true")
 	}
 
-	if len(server.Location) != 1 {
-		t.Fatalf("Expected 1 location, got %d", len(server.Location))
+	if len(server.Location) != 2 {
+		t.Fatalf("Expected 2 locations, got %d", len(server.Location))
 	}
 
-	location := server.Location[0]
-	if location.Path != "/api/test" {
-		t.Errorf("Expected path /api/test, got %s", location.Path)
+	// Test first location
+	location1 := server.Location[0]
+	if location1.Path != "/api/test" {
+		t.Errorf("Expected path /api/test, got %s", location1.Path)
 	}
 
-	if location.Method != "GET" {
-		t.Errorf("Expected method GET, got %s", location.Method)
+	if location1.Method != "GET" {
+		t.Errorf("Expected method GET, got %s", location1.Method)
 	}
 
-	if location.Response != `{"test": true}` {
-		t.Errorf("Expected response '{\"test\": true}', got %s", location.Response)
+	if location1.Response != `{"test": true}` {
+		t.Errorf("Expected response '{\"test\": true}', got %s", location1.Response)
 	}
 
-	if location.StatusCode != 200 {
-		t.Errorf("Expected status code 200, got %d", location.StatusCode)
+	if location1.StatusCode != 200 {
+		t.Errorf("Expected status code 200, got %d", location1.StatusCode)
+	}
+
+	// Test second location with schema
+	location2 := server.Location[1]
+	if location2.Path != "/api/echo" {
+		t.Errorf("Expected path /api/echo, got %s", location2.Path)
+	}
+
+	if location2.Method != "POST" {
+		t.Errorf("Expected method POST, got %s", location2.Method)
+	}
+
+	if location2.Response != `{"echo": "{{.message}}"}` {
+		t.Errorf("Expected response '{\"echo\": \"{{.message}}\"}', got %s", location2.Response)
+	}
+
+	if location2.StatusCode != 200 {
+		t.Errorf("Expected status code 200, got %d", location2.StatusCode)
+	}
+
+	// Verify schema is present and contains required fields
+	if location2.Schema == "" {
+		t.Error("Schema should not be empty")
+	}
+
+	// Check that schema contains required JSON schema fields
+	if !strings.Contains(location2.Schema, `"type": "object"`) {
+		t.Error("Schema should contain 'type: object'")
+	}
+	if !strings.Contains(location2.Schema, `"message"`) {
+		t.Error("Schema should contain 'message' property")
+	}
+	if !strings.Contains(location2.Schema, `"required"`) {
+		t.Error("Schema should contain 'required' field")
 	}
 }
 
