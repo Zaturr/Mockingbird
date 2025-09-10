@@ -5,7 +5,6 @@ go 1.24.0
 toolchain go1.24.6
 
 require (
-	github.com/Orlandoiii/logger v0.0.22
 	github.com/SOLUCIONESSYCOM/scribe v0.0.0-20250530190709-9fd65c2dc0f5
 	github.com/gin-gonic/gin v1.9.1
 	github.com/google/uuid v1.6.0
