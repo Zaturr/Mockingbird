@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"fmt"
+	"github.com/SOLUCIONESSYCOM/scribe"
 	"log"
+	"mockingbird/internal/logger"
 	"net/http"
 	"strconv"
 	"sync"
@@ -22,6 +24,7 @@ type Server struct {
 	httpServer *http.Server
 	handler    *handler.Handler
 	locations  []models.Location
+	logger     *scribe.Scribe
 }
 
 // Manager manages multiple server instances
@@ -64,6 +67,12 @@ func (m *Manager) CreateServer(config models.Server) error {
 	// Create Gin router
 	router := gin.New()
 
+	var log *scribe.Scribe
+	var err error
+	log, err = logger.GetLoggerContext(config)
+	if err != nil {
+		log = &scribe.Scribe{}
+	}
 	// Add middleware
 	router.Use(gin.Recovery())
 	if config.Logger != nil && *config.Logger {
@@ -71,7 +80,9 @@ func (m *Manager) CreateServer(config models.Server) error {
 	}
 
 	// Create handler
-	h := handler.NewHandler()
+	h := handler.NewHandler(log)
+
+	h.Logger = log
 
 	// Create server
 	server := &Server{
@@ -79,6 +90,7 @@ func (m *Manager) CreateServer(config models.Server) error {
 		Router:    router,
 		handler:   h,
 		locations: config.Location,
+		logger:    log,
 	}
 
 	// Register routes
@@ -107,7 +119,7 @@ func (s *Server) registerRoutes() error {
 			}
 		}(location))
 
-		log.Printf("Registered route: %s %s", location.Method, location.Path)
+		s.logger.Info().Msg(fmt.Sprintf("Registered route: %s %s", location.Method, location.Path))
 	}
 
 	return nil

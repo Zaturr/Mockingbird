@@ -13,7 +13,6 @@ import (
 	"mockingbird/internal/chaos"
 	"mockingbird/internal/models"
 
-	"github.com/Orlandoiii/logger"
 	"github.com/SOLUCIONESSYCOM/scribe"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -24,19 +23,21 @@ import (
 type Handler struct {
 	chaosEngine *chaos.Engine
 	schemas     map[string]*jsonschema.Schema
+	Logger      *scribe.Scribe
 }
 
 // NewHandler creates a new handler with the given chaos engine
-func NewHandler() *Handler {
+func NewHandler(logger *scribe.Scribe) *Handler {
 	return &Handler{
 		chaosEngine: chaos.NewEngine(),
 		schemas:     make(map[string]*jsonschema.Schema),
+		Logger:      logger,
 	}
 }
 
 // RegisterLocation registers a location with the handler
 func (h *Handler) RegisterLocation(location models.Location) error {
-	logger.Info().
+	h.Logger.Info().
 		Str("path", location.Path).
 		Str("method", location.Method).
 		Int("status_code", location.StatusCode).
@@ -46,7 +47,7 @@ func (h *Handler) RegisterLocation(location models.Location) error {
 	if location.Schema != "" {
 		schema, err := h.compileSchema(location.Schema)
 		if err != nil {
-			logger.Error().
+			h.Logger.Error().
 				Str("path", location.Path).
 				Str("method", location.Method).
 				AnErr("error", err).
@@ -54,7 +55,7 @@ func (h *Handler) RegisterLocation(location models.Location) error {
 			return fmt.Errorf("error compiling schema for path %s: %w", location.Path, err)
 		}
 		h.schemas[location.Path+":"+location.Method] = schema
-		logger.Debug().
+		h.Logger.Debug().
 			Str("path", location.Path).
 			Str("method", location.Method).
 			Msg("Schema compiled successfully for location")
@@ -89,13 +90,16 @@ func (h *Handler) compileSchema(schemaStr string) (*jsonschema.Schema, error) {
 
 // HandleRequest handles an HTTP request based on the location configuration
 func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
-	ctx := c.Request.Context()
-	lc := scribe.GetLogContext(ctx)
-	lc.Set("request_id", uuid.New().String())
-	lc.Set("location_path", location.Path)
-	lc.Set("location_method", location.Method)
+	ctx := scribe.WithCtx(c.Request.Context())
 
-	scribe.DebugWithCtx(ctx).
+	logCtx := scribe.GetLogContext(ctx)
+
+	logCtx.Set("request_trace_id", uuid.New().String())
+	r := c.Request.WithContext(ctx)
+
+	c.Request = r
+
+	h.Logger.DebugCtx(ctx).
 		Str("method", c.Request.Method).
 		Str("path", c.Request.URL.Path).
 		Str("ip", c.ClientIP()).
@@ -104,7 +108,7 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 	// Apply chaos injection if configured
 	if location.ChaosInjection != nil {
 		if h.chaosEngine.ApplyChaos(c.Writer, location.ChaosInjection) {
-			scribe.WarnWithCtx(ctx).Msg("Request aborted by chaos injection")
+			h.Logger.WarnCtx(ctx).Msg("Request aborted by chaos injection")
 			return // Request was aborted by chaos injection
 		}
 	}
@@ -112,7 +116,7 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 	// Validate request body against schema if configured
 	if schema, ok := h.schemas[location.Path+":"+location.Method]; ok {
 		if err := h.validateRequestBody(c, schema); err != nil {
-			scribe.ErrorWithCtx(ctx).AnErr("validation_error", err).Msg("Schema validation failed")
+			h.Logger.ErrorCtx(ctx).AnErr("validation_error", err).Msg("Schema validation failed")
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Schema validation failed: %v", err)})
 			return
 		}
@@ -127,11 +131,11 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 
 	// Handle async call if configured
 	if location.Async != nil {
-		scribe.InfoWithCtx(ctx).
+		h.Logger.InfoCtx(ctx).
 			Str("async_url", location.Async.Url).
 			Str("async_method", location.Async.Method).
 			Msg("Starting async call")
-		go h.handleAsyncCall(location.Async)
+		go h.handleAsyncCall(location.Async, c)
 	}
 
 	// Set response status code
@@ -144,15 +148,16 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 		// Process template if it contains template variables
 		responseBody, err := h.processResponseTemplate(c, string(location.Response))
 		if err != nil {
-			scribe.ErrorWithCtx(ctx).AnErr("template_error", err).Msg("Error processing response template")
+			h.Logger.ErrorCtx(ctx).AnErr("template_error", err).Msg("Error processing response template")
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error processing response template"})
 			return
 		}
 
+		h.Logger.InfoCtx(ctx).Str("response", string(responseBody)).Msg("Response processed successfully")
 		c.String(location.StatusCode, responseBody)
 	}
 
-	scribe.InfoWithCtx(ctx).
+	h.Logger.InfoCtx(ctx).
 		Int("status_code", location.StatusCode).
 		Msg("Request completed successfully")
 }
@@ -161,13 +166,13 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 func (h *Handler) validateRequestBody(c *gin.Context, schema *jsonschema.Schema) error {
 	ctx := c.Request.Context()
 
-	scribe.DebugWithCtx(ctx).Msg("Starting request body validation")
+	h.Logger.InfoCtx(ctx).Msg("Starting request body validation")
 
 	// Read the request body
 	body, err := io.ReadAll(c.Request.Body)
 
 	if err != nil {
-		scribe.ErrorWithCtx(ctx).AnErr("error", err).Msg("Error reading request body")
+		h.Logger.ErrorCtx(ctx).AnErr("error", err).Msg("Error reading request body")
 		return fmt.Errorf("error reading request body: %w", err)
 	}
 
@@ -179,24 +184,33 @@ func (h *Handler) validateRequestBody(c *gin.Context, schema *jsonschema.Schema)
 	// Parse the JSON
 	var data interface{}
 	if err := json.Unmarshal(body, &data); err != nil {
-		scribe.ErrorWithCtx(ctx).AnErr("error", err).Msg("Error parsing JSON")
+		h.Logger.ErrorCtx(ctx).AnErr("error", err).Msg("Error parsing JSON")
 		return fmt.Errorf("error parsing JSON: %w", err)
 	}
 
 	// Validate against the schema
 	if err := schema.Validate(data); err != nil {
-		scribe.ErrorWithCtx(ctx).AnErr("validation_error", err).Msg("Schema validation failed")
+		h.Logger.ErrorCtx(ctx).AnErr("validation_error", err).Msg("Schema validation failed")
 		return err
 	}
 
-	scribe.DebugWithCtx(ctx).Msg("Request body validation successful")
+	h.Logger.DebugCtx(ctx).Msg("Request body validation successful")
 
 	return nil
 }
 
 // handleAsyncCall handles an asynchronous HTTP call
-func (h *Handler) handleAsyncCall(async *models.Async) {
-	logger.Debug().
+func (h *Handler) handleAsyncCall(async *models.Async, c *gin.Context) {
+
+	ctx := scribe.WithCtx(c.Request.Context())
+
+	lc := scribe.GetLogContext(ctx)
+	lc.Set("async_request_trace_id", uuid.New().String())
+
+	r := c.Request.WithContext(ctx)
+	c.Request = r
+
+	h.Logger.DebugCtx(ctx).
 		Str("url", async.Url).
 		Str("method", async.Method).
 		Msg("Creating async HTTP request")
@@ -215,7 +229,7 @@ func (h *Handler) handleAsyncCall(async *models.Async) {
 
 	req, err := http.NewRequest(async.Method, async.Url, body)
 	if err != nil {
-		logger.Error().
+		h.Logger.ErrorCtx(ctx).
 			Str("url", async.Url).
 			Str("method", async.Method).
 			AnErr("error", err).
@@ -255,7 +269,7 @@ func (h *Handler) handleAsyncCall(async *models.Async) {
 		}
 
 		if i < retries-1 {
-			logger.Warn().
+			h.Logger.WarnCtx(ctx).
 				Str("url", async.Url).
 				Int("attempt", i+1).
 				Int("max_retries", retries-1).
@@ -267,7 +281,7 @@ func (h *Handler) handleAsyncCall(async *models.Async) {
 
 	// Handle response
 	if lastErr != nil {
-		logger.Error().
+		h.Logger.ErrorCtx(ctx).
 			Str("url", async.Url).
 			Str("method", async.Method).
 			Int("retries", retries-1).
@@ -278,7 +292,7 @@ func (h *Handler) handleAsyncCall(async *models.Async) {
 	defer resp.Body.Close()
 
 	// Log response status
-	logger.Info().
+	h.Logger.InfoCtx(ctx).
 		Str("url", async.Url).
 		Str("method", async.Method).
 		Str("status", resp.Status).

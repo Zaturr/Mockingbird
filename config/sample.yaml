@@ -2,10 +2,19 @@ http:
   servers:
     - listen: 8080
       logger: true
+      logger_path: "./logs/serverA"
+      name: "SERVER 1"
+      version: "0.0.1"
       location:
         - path: /api/hello
           method: GET
           response: '{"message": "Hello, World!"}'
+          status_code: 200
+          headers:
+            Content-Type: application/json
+        - path: /api/callback
+          method: POST
+          response: '{"message": "Callback ok"}'
           status_code: 200
           headers:
             Content-Type: application/json
@@ -15,20 +24,24 @@ http:
             {
               "type": "object",
               "properties": {
-                "message": { "type": "string" }
+                "message": { "type": "string" },
+                "x": {"type": "string"}
               },
               "required": ["message"]
             }
-          response: '{"echo": "{{.message}}"}'
-          status_code: 200
+          response: '{"echo": "{{.message}}", "x": "{{.x}}"}'
+          status_code: 400
           headers:
             Content-Type: application/json
     - listen: 8081
-      logger: false
+      logger: true
+      logger_path: "./logs/serverB"
+      name: "SERVER 2"
+      version: "0.0.1"
       chaos_injection:
         latency:
           time: 100
-          probability: "50"
+          probability: "100"
         abort:
           code: 500
           probability: "10"
@@ -42,6 +55,11 @@ http:
           status_code: 200
           headers:
             Content-Type: application/json
+          chaos_injection:
+            error:
+              code: 500
+              probability: "100"
+              response: '{"error": "no controlado"}'
         - path: /api/async
           method: POST
           response: '{"status": "processing"}'
@@ -55,88 +73,10 @@ http:
             retry_delay: 1000
             headers:
               Content-Type: application/json
-
-
-
-
         - path: /api/users
           method: POST
           schema: |
-            {
-              "type": "object",
-              "properties": {
-                "user": {
-                  "type": "object",
-                  "properties": {
-                    "id": { 
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "name": { 
-                      "type": "string",
-                      "minLength": 2,
-                      "maxLength": 50
-                    },
-                    "email": { 
-                      "type": "string",
-                      "format": "email"
-                    },
-                    "age": {
-                      "type": "integer",
-                      "minimum": 18,
-                      "maximum": 120
-                    },
-                    "roles": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "enum": ["admin", "user", "editor", "viewer"]
-                      },
-                      "minItems": 1
-                    },
-                    "preferences": {
-                      "type": "object",
-                      "properties": {
-                        "notifications": { "type": "boolean" },
-                        "theme": { 
-                          "type": "string",
-                          "enum": ["light", "dark", "system"]
-                        },
-                        "language": { 
-                          "type": "string",
-                          "pattern": "^[a-z]{2}(-[A-Z]{2})?$"
-                        }
-                      }
-                    },
-                    "address": {
-                      "type": "object",
-                      "properties": {
-                        "street": { "type": "string" },
-                        "city": { "type": "string" },
-                        "zipcode": { 
-                          "type": "string",
-                          "pattern": "^\\d{5}(-\\d{4})?$"
-                        },
-                        "country": { "type": "string" }
-                      },
-                      "required": ["street", "city", "country"]
-                    }
-                  },
-                  "required": ["id", "name", "email", "roles"]
-                },
-                "metadata": {
-                  "type": "object",
-                  "properties": {
-                    "source": { "type": "string" },
-                    "timestamp": { 
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  }
-                }
-              },
-              "required": ["user"]
-            }
+            {"type":"object","properties":{"user":{"type":"object","properties":{"id":{"type":"integer","minimum":1},"name":{"type":"string","minLength":2,"maxLength":50},"email":{"type":"string","format":"email"},"age":{"type":"integer","minimum":18,"maximum":120},"roles":{"type":"array","items":{"type":"string","enum":["admin","user","editor","viewer"]},"minItems":1},"preferences":{"type":"object","properties":{"notifications":{"type":"boolean"},"theme":{"type":"string","enum":["light","dark","system"]},"language":{"type":"string","pattern":"^[a-z]{2}(-[A-Z]{2})?$"}}},"address":{"type":"object","properties":{"street":{"type":"string"},"city":{"type":"string"},"zipcode":{"type":"string","pattern":"^\\d{5}(-\\d{4})?$"},"country":{"type":"string"}},"required":["street","city","country"]}},"required":["id","name","email","roles"]},"metadata":{"type":"object","properties":{"source":{"type":"string"},"timestamp":{"type":"string","format":"date-time"}}}},"required":["user"]}
           response: |
             {
               "status": "success",

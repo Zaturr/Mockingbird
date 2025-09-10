@@ -60,4 +60,5 @@ type Abort struct {
 type Error struct {
 	Code        int    `yaml:"code" json:"code"`
 	Probability string `yaml:"probability" json:"probability"`
+	Response    string `yaml:"response" json:"response"`
 }
