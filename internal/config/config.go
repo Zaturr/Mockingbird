@@ -3,10 +3,12 @@ package config
 import (
 	"fmt"
 	"io/ioutil"
+	"mockingbird/internal/models"
 	"os"
 	"path/filepath"
 
-	"mockingbird/internal/models"
+	"github.com/SOLUCIONESSYCOM/scribe"
+	"github.com/google/uuid"
 
 	"gopkg.in/yaml.v3"
 )
@@ -140,4 +142,38 @@ func GetLogSettings() *models.LogSettings {
 		MaxBackups:        5,
 		Compress:          true,
 	}
+}
+
+func init() {
+	fmt.Println("Inicio Config Package")
+
+	logConfig := &scribe.ConfigLogger{
+		Console:           true,
+		File:              true,
+		BeutifyConsoleLog: false,
+		FilePath:          "./logs",
+		MinLevel:          "info",
+		RotationMaxSizeMB: 10,
+		MaxBackups:        5,
+		MaxAgeDay:         30,
+		Compress:          false,
+	}
+
+	appGlobalFields := map[string]interface{}{
+		"service_name":    "mockingbird",
+		"service_version": "1.0.0",
+		"service_id":      uuid.New().String(),
+		"environment":     "production",
+	}
+
+	scribe.SetGlobalFields(appGlobalFields)
+
+	logger, err := scribe.New(logConfig, nil, nil)
+	if err != nil {
+		panic("No se puede configurar el logger: " + err.Error())
+	}
+
+	scribe.SetDefaultLogger(logger)
+
+	scribe.Info().Msg("Logger configurado correctamente con Scribe")
 }

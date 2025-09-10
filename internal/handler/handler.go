@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"text/template"
 	"time"
 
 	"mockingbird/internal/chaos"
@@ -139,7 +140,16 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 	// Set response body if configured
 	if location.Response != "" {
 		c.Header("Content-Type", "application/json")
-		c.String(location.StatusCode, location.Response)
+
+		// Process template if it contains template variables
+		responseBody, err := h.processResponseTemplate(c, string(location.Response))
+		if err != nil {
+			scribe.ErrorWithCtx(ctx).AnErr("template_error", err).Msg("Error processing response template")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error processing response template"})
+			return
+		}
+
+		c.String(location.StatusCode, responseBody)
 	}
 
 	scribe.InfoWithCtx(ctx).
@@ -274,4 +284,56 @@ func (h *Handler) handleAsyncCall(async *models.Async) {
 		Str("status", resp.Status).
 		Int("status_code", resp.StatusCode).
 		Msg("Async request completed successfully")
+}
+
+// processResponseTemplate processes the response template with request data
+func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate string) (string, error) {
+	// Check if template contains template variables
+	if !strings.Contains(responseTemplate, "{{") {
+		return responseTemplate, nil
+	}
+
+	// Parse request body to extract data for template variables
+	var requestData interface{}
+	if c.Request.Body != nil {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			return "", fmt.Errorf("error reading request body: %w", err)
+		}
+
+		// Restore the request body for potential later use
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+
+		if len(body) > 0 {
+			if err := json.Unmarshal(body, &requestData); err != nil {
+				return "", fmt.Errorf("error parsing request JSON: %w", err)
+			}
+		}
+	}
+
+	// Create template with custom functions
+	tmpl, err := template.New("response").Funcs(template.FuncMap{
+		"toJson": func(v interface{}) string {
+			jsonBytes, err := json.Marshal(v)
+			if err != nil {
+				return "null"
+			}
+			return string(jsonBytes)
+		},
+		"now": func() string {
+			return time.Now().Format(time.RFC3339)
+		},
+	}).Parse(responseTemplate)
+
+	if err != nil {
+		return "", fmt.Errorf("error parsing template: %w", err)
+	}
+
+	// Execute template with request data
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, requestData); err != nil {
+		return "", fmt.Errorf("error executing template: %w", err)
+	}
+
+	return buf.String(), nil
 }

@@ -55,3 +55,105 @@ http:
             retry_delay: 1000
             headers:
               Content-Type: application/json
+
+
+
+
+        - path: /api/users
+          method: POST
+          schema: |
+            {
+              "type": "object",
+              "properties": {
+                "user": {
+                  "type": "object",
+                  "properties": {
+                    "id": { 
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "name": { 
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 50
+                    },
+                    "email": { 
+                      "type": "string",
+                      "format": "email"
+                    },
+                    "age": {
+                      "type": "integer",
+                      "minimum": 18,
+                      "maximum": 120
+                    },
+                    "roles": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["admin", "user", "editor", "viewer"]
+                      },
+                      "minItems": 1
+                    },
+                    "preferences": {
+                      "type": "object",
+                      "properties": {
+                        "notifications": { "type": "boolean" },
+                        "theme": { 
+                          "type": "string",
+                          "enum": ["light", "dark", "system"]
+                        },
+                        "language": { 
+                          "type": "string",
+                          "pattern": "^[a-z]{2}(-[A-Z]{2})?$"
+                        }
+                      }
+                    },
+                    "address": {
+                      "type": "object",
+                      "properties": {
+                        "street": { "type": "string" },
+                        "city": { "type": "string" },
+                        "zipcode": { 
+                          "type": "string",
+                          "pattern": "^\\d{5}(-\\d{4})?$"
+                        },
+                        "country": { "type": "string" }
+                      },
+                      "required": ["street", "city", "country"]
+                    }
+                  },
+                  "required": ["id", "name", "email", "roles"]
+                },
+                "metadata": {
+                  "type": "object",
+                  "properties": {
+                    "source": { "type": "string" },
+                    "timestamp": { 
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              },
+              "required": ["user"]
+            }
+          response: |
+            {
+              "status": "success",
+              "message": "User {{.user.name}} created successfully",
+              "userId": {{.user.id}},
+              "userDetails": {
+                "name": "{{.user.name}}",
+                "email": "{{.user.email}}",
+                "age": {{.user.age}},
+                "roles": {{toJson .user.roles}},
+                "preferences": {{toJson .user.preferences}},
+                "address": {{toJson .user.address}}
+              },
+              "createdAt": "{{now}}",
+              "metadata": {{toJson .metadata}}
+            }
+          status_code: 201
+          headers:
+            Content-Type: application/json
+            X-Custom-Header: user-created
