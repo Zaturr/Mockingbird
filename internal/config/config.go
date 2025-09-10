@@ -2,21 +2,30 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"mockingbird/internal/models"
 	"os"
 	"path/filepath"
 
-	"github.com/SOLUCIONESSYCOM/scribe"
-	"github.com/google/uuid"
-
 	"gopkg.in/yaml.v3"
 )
+
+var config *models.MockServer
 
 // LoadConfig loads a mock server configuration from a YAML file
 func LoadConfig(filePath string) (*models.MockServer, error) {
 	// Read the YAML file
-	data, err := ioutil.ReadFile(filePath)
+	f, err := os.OpenFile(filePath, os.O_RDONLY|os.O_CREATE, 0666)
+
+	defer f.Close()
+
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := io.ReadAll(f)
+
 	if err != nil {
 		return nil, fmt.Errorf("error reading config file: %w", err)
 	}
@@ -132,48 +141,14 @@ func GetConfigDir() string {
 // GetLogSettings returns the default logging configuration
 func GetLogSettings() *models.LogSettings {
 	return &models.LogSettings{
-		Console:           true,
-		BeutifyConsoleLog: true,
-		File:              true,
-		Path:              "./logs/mockingbird.log",
-		MinLevel:          "info",
-		RotationMaxSizeMB: 100,
-		MaxAgeDay:         30,
-		MaxBackups:        5,
-		Compress:          true,
+		Console:            true,
+		BeautifyConsoleLog: true,
+		File:               true,
+		Path:               "./logs/mockingbird.log",
+		MinLevel:           "debug",
+		RotationMaxSizeMB:  100,
+		MaxAgeDay:          30,
+		MaxBackups:         5,
+		Compress:           true,
 	}
-}
-
-func init() {
-	fmt.Println("Inicio Config Package")
-
-	logConfig := &scribe.ConfigLogger{
-		Console:           true,
-		File:              true,
-		BeutifyConsoleLog: false,
-		FilePath:          "./logs",
-		MinLevel:          "info",
-		RotationMaxSizeMB: 10,
-		MaxBackups:        5,
-		MaxAgeDay:         30,
-		Compress:          false,
-	}
-
-	appGlobalFields := map[string]interface{}{
-		"service_name":    "mockingbird",
-		"service_version": "1.0.0",
-		"service_id":      uuid.New().String(),
-		"environment":     "production",
-	}
-
-	scribe.SetGlobalFields(appGlobalFields)
-
-	logger, err := scribe.New(logConfig, nil, nil)
-	if err != nil {
-		panic("No se puede configurar el logger: " + err.Error())
-	}
-
-	scribe.SetDefaultLogger(logger)
-
-	scribe.Info().Msg("Logger configurado correctamente con Scribe")
 }
