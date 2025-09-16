@@ -1,10 +1,10 @@
 package config
 
 import (
+	"catalyst/internal/models"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"mockingbird/internal/models"
 	"os"
 	"path/filepath"
 

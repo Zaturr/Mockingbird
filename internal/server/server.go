@@ -1,18 +1,18 @@
 package server
 
 import (
+	"catalyst/internal/logger"
 	"context"
 	"fmt"
 	"github.com/SOLUCIONESSYCOM/scribe"
 	"log"
-	"mockingbird/internal/logger"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
 
-	"mockingbird/internal/handler"
-	"mockingbird/internal/models"
+	"catalyst/internal/handler"
+	"catalyst/internal/models"
 
 	"github.com/gin-gonic/gin"
 )
@@ -69,7 +69,15 @@ func (m *Manager) CreateServer(config models.Server) error {
 
 	var log *scribe.Scribe
 	var err error
-	log, err = logger.GetLoggerContext(config)
+
+	log, err = logger.GetLoggerContext(models.LogDescriptor{
+		Name:    *config.Name,
+		Version: *config.Version,
+		Path:    *config.LoggerPath,
+		File:    *config.Logger,
+		Logger:  *config.Logger,
+	})
+
 	if err != nil {
 		log = &scribe.Scribe{}
 	}

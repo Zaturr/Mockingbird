@@ -10,8 +10,8 @@ import (
 	"text/template"
 	"time"
 
-	"mockingbird/internal/chaos"
-	"mockingbird/internal/models"
+	"catalyst/internal/chaos"
+	"catalyst/internal/models"
 
 	"github.com/SOLUCIONESSYCOM/scribe"
 	"github.com/gin-gonic/gin"

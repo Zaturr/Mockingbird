@@ -7,6 +7,7 @@ http:
       version: "0.0.1"
       location:
         - path: /api/hello
+          delay: 100 #in milliseconds
           method: GET
           response: '{"message": "Hello, World!"}'
           status_code: 200
@@ -30,7 +31,7 @@ http:
               "required": ["message"]
             }
           response: '{"echo": "{{.message}}", "x": "{{.x}}"}'
-          status_code: 400
+          status_code: 200
           headers:
             Content-Type: application/json
     - listen: 8081
@@ -97,3 +98,21 @@ http:
           headers:
             Content-Type: application/json
             X-Custom-Header: user-created
+postgres:
+    servers:
+      - name: 'pgA'
+        user: 'user'
+        password: 'password'
+        database: 'postgres'
+        host: '127.0.0.1'
+        port: 5432
+        init_script: './init.sql' #optional
+        seed:
+          - table: 'credito_inmediato_enviado'
+            schema: 'simf'
+            rows: 100
+            overrides: #optional. if present it intercepts the column if found and injects the data, otherwise it will fake the data.
+              - column: 'st_respst_negoci'
+                value: 'A'
+
+

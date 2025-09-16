@@ -6,9 +6,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"mockingbird/internal/config"
-	"mockingbird/internal/models"
-	"mockingbird/internal/server"
+	"catalyst/internal/config"
+	"catalyst/internal/models"
+	"catalyst/internal/server"
 )
 
 // ServerManager wraps the server manager

@@ -1,27 +1,27 @@
 package logger
 
 import (
-	"mockingbird/internal/config"
-	"mockingbird/internal/models"
+	"catalyst/internal/config"
+	"catalyst/internal/models"
 
 	"github.com/SOLUCIONESSYCOM/scribe"
 	"github.com/google/uuid"
 )
 
-func GetLoggerContext(server models.Server) (*scribe.Scribe, error) {
+func GetLoggerContext(server models.LogDescriptor) (*scribe.Scribe, error) {
 
 	logSettings := config.GetLogSettings()
 
 	loggerConfig := &scribe.ConfigLogger{
-		FilePath:          *server.LoggerPath,             // FilePath donde se guardarán los logs
+		FilePath:          server.Path,                    // FilePath donde se guardarán los logs
 		MinLevel:          logSettings.MinLevel,           // Nivel mínimo de log (trace, debug, info, warn, error, fatal)
 		RotationMaxSizeMB: logSettings.RotationMaxSizeMB,  // Tamaño máximo del archivo antes de rotar
 		MaxBackups:        logSettings.MaxBackups,         // Número máximo de archivos de respaldo
 		MaxAgeDay:         logSettings.MaxAgeDay,          // Días máximos para conservar los logs
 		Compress:          logSettings.Compress,           // Comprimir logs rotados
-		Console:           *server.Logger,                 // Mostrar logs en consola
+		Console:           server.Logger,                  // Mostrar logs en consola
 		BeutifyConsoleLog: logSettings.BeautifyConsoleLog, // Formato bonito en consola (false = JSON)
-		File:              *server.Logger,                 // Escribir logs en archivo
+		File:              server.File,                    // Escribir logs en archivo
 	}
 
 	globals := map[string]interface{}{

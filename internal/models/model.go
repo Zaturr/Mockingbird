@@ -1,10 +1,17 @@
 package models
 
+import "github.com/testcontainers/testcontainers-go/modules/postgres"
+
 type MockServer struct {
-	Http Http `yaml:"http" json:"http"`
+	Http            Http            `yaml:"http" json:"http"`
+	PostgresServers PostgresServers `yaml:"postgres" json:"postgres"`
 }
 type Http struct {
 	Servers []Server `yaml:"servers" json:"servers"`
+}
+
+type PostgresServers struct {
+	Postgres []PostgresServer `yaml:"postgres" json:"postgres"`
 }
 
 type Server struct {
@@ -15,6 +22,14 @@ type Server struct {
 	Version        *string         `yaml:"version" json:"version"`
 	ChaosInjection *ChaosInjection `yaml:"chaos_injection" json:"chaosInjection"`
 	Location       []Location      `yaml:"location" json:"location"`
+}
+
+type LogDescriptor struct {
+	Name    string
+	Version string
+	Path    string
+	File    bool
+	Logger  bool
 }
 
 type Location struct {
@@ -72,4 +87,31 @@ type LogSettings struct {
 	MaxAgeDay          int    `yaml:"max_age_day"`
 	MaxBackups         int    `yaml:"max_backups"`
 	Compress           bool   `yaml:"compress"`
+}
+
+type PostgresServer struct {
+	Name              string
+	User              string
+	Password          string
+	Host              string
+	Port              int
+	Database          string
+	InitScript        string
+	Seed              string
+	PostgresContainer *postgres.PostgresContainer
+	Logger            *bool
+	LoggerPath        *string
+	File              *bool
+}
+
+type Seed struct {
+	Table     string
+	Schema    string
+	Rows      int
+	Overrides []Overrides
+}
+
+type Overrides struct {
+	Column string
+	Value  string
 }
