@@ -11,7 +11,7 @@ type Http struct {
 }
 
 type PostgresServers struct {
-	Postgres []PostgresServer `yaml:"postgres" json:"postgres"`
+	Postgres []PostgresServer `yaml:"servers" json:"servers"`
 }
 
 type Server struct {
@@ -35,6 +35,7 @@ type LogDescriptor struct {
 type Location struct {
 	Path           string          `yaml:"path" json:"path"`
 	Method         string          `yaml:"method" json:"method"`
+	StaticFilesDir string          `yaml:"static_dir" json:"static_dir"`
 	Schema         string          `yaml:"schema" json:"schema"`
 	Response       string          `yaml:"response" json:"response"`
 	Async          *Async          `yaml:"async" json:"async"`
@@ -90,28 +91,28 @@ type LogSettings struct {
 }
 
 type PostgresServer struct {
-	Name              string
-	User              string
-	Password          string
-	Host              string
-	Port              int
-	Database          string
-	InitScript        string
-	Seed              string
-	PostgresContainer *postgres.PostgresContainer
-	Logger            *bool
-	LoggerPath        *string
-	File              *bool
+	Name              string                      `yaml:"name" json:"name"`
+	User              string                      `yaml:"user" json:"user"`
+	Password          string                      `yaml:"password" json:"password"`
+	Host              string                      `yaml:"host" json:"host"`
+	Port              int                         `yaml:"port" json:"port"`
+	Database          string                      `yaml:"database" json:"database"`
+	InitScript        string                      `yaml:"init_script" json:"init_script"`
+	Seed              []Seed                      `yaml:"seed" json:"seed"`
+	PostgresContainer *postgres.PostgresContainer `yaml:"postgres_container" json:"postgres_container"`
+	Logger            *bool                       `yaml:"logger" json:"logger"`
+	LoggerPath        *string                     `yaml:"logger_path" json:"logger_path"`
+	File              *bool                       `yaml:"file" json:"file"`
 }
 
 type Seed struct {
-	Table     string
-	Schema    string
-	Rows      int
-	Overrides []Overrides
+	Table     string      `yaml:"table" json:"table"`
+	Schema    string      `yaml:"schema" json:"schema"`
+	Rows      int         `yaml:"rows" json:"rows"`
+	Overrides []Overrides `yaml:"overrides" json:"overrides"`
 }
 
 type Overrides struct {
-	Column string
-	Value  string
+	Column string `yaml:"column" json:"column"`
+	Value  string `yaml:"value" json:"value"`
 }

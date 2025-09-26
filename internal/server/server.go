@@ -120,12 +120,18 @@ func (s *Server) registerRoutes() error {
 			return fmt.Errorf("error registering location %s: %w", location.Path, err)
 		}
 
-		// Create route handler
-		s.Router.Handle(location.Method, location.Path, func(loc models.Location) gin.HandlerFunc {
-			return func(c *gin.Context) {
-				s.handler.HandleRequest(c, loc)
-			}
-		}(location))
+		if location.StaticFilesDir != "" {
+			s.logger.Info().Msg(fmt.Sprintf("registering static files at %s", location.StaticFilesDir))
+			//currentPath, _ := os.Getwd()
+			s.Router.Static(location.Path, "/Users/quintero/GolandProjects/Catalyst/config/samplesite")
+		} else {
+			// Create route handler
+			s.Router.Handle(location.Method, location.Path, func(loc models.Location) gin.HandlerFunc {
+				return func(c *gin.Context) {
+					s.handler.HandleRequest(c, loc)
+				}
+			}(location))
+		}
 
 		s.logger.Info().Msg(fmt.Sprintf("Registered route: %s %s", location.Method, location.Path))
 	}

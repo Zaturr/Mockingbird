@@ -123,6 +123,25 @@ func validateConfig(config *models.MockServer) error {
 		}
 	}
 
+	for _, server := range config.PostgresServers.Postgres {
+		if server.Host == "" {
+			return fmt.Errorf("server has no host defined")
+		}
+		if server.Port == 0 {
+			return fmt.Errorf("server has no port defined")
+		}
+		if server.Database == "" {
+			return fmt.Errorf("server has no database defined")
+		}
+		if server.User == "" {
+			return fmt.Errorf("server has no user defined")
+		}
+		if server.Password == "" {
+			return fmt.Errorf("server has no password defined")
+		}
+
+	}
+
 	return nil
 }
 
