@@ -1,0 +1,97 @@
+http:
+  servers:
+    - listen: 3000
+      logger: true
+      name: "BANCRECER"
+      logger_path: "./log/bancrecer"
+      version: "0.0.1"
+      location:
+        - path: /bancrecer/simf/1.0.0/enviar
+          schema: |
+            {
+              "$schema": "http://json-schema.org/draft-07/schema#",
+              "title": "Enviar Transaction Request",
+              "type": "object",
+              "required": [
+                "OriginId",
+                "OriginAccount",
+                "DestinyBank",
+                "DestinyAlias",
+                "DestinyIdType",
+                "DestinyId",
+                "DestinyType",
+                "DestinyAccount",
+                "Description",
+                "Currency",
+                "Amount",
+                "Channel",
+                "AddDirectory",
+                "IpAddress"
+              ],
+              "properties": {
+                "OriginId": {
+                  "type": "string"
+                },
+                "OriginAccount": {
+                  "type": "string"
+                },
+                "DestinyBank": {
+                  "type": "string"
+                },
+                "DestinyAlias": {
+                  "type": "string"
+                },
+                "DestinyIdType": {
+                  "type": "string"
+                },
+                "DestinyId": {
+                  "type": "string"
+                },
+                "DestinyType": {
+                  "type": "string"
+                },
+                "DestinyAccount": {
+                  "type": "string"
+                },
+                "Description": {
+                  "type": "string"
+                },
+                "Currency": {
+                  "type": "string"
+                },
+                "Amount": {
+                  "type": "number",
+                  "format": "double"
+                },
+                "Channel": {
+                  "type": "string"
+                },
+                "AddDirectory": {
+                  "type": "boolean"
+                },
+                "IpAddress": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          method: POST
+          response: '{
+                "Amount": {{.Amount}},
+                "Bank": "Bancrecer",
+                "Currency": "{{.Currency}}",
+                "EndToEndId": "0168{{ now.Format "20060102150405" }}{{ randInt 1000 9999 }}",
+                "Product": "Credito Inmediato",
+                "Date": "{{now.Format "2006 Jan 02"}}",
+                "Time": "09:52 a. m.",
+                "Description": "{{.Description}}",
+                "Reference": "00201511",
+                "Status": "Pagado",
+                "StatusCode": {{randInt 1 6}},
+                "Destiny": "{{.DestinyAccount}}",
+                "Symbol": "Bs.",
+                "Reason": ""
+              }'
+          status_code: 200
+          headers:
+            Content-Type: application/json
