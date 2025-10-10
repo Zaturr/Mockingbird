@@ -14,6 +14,7 @@ type Server struct {
 	Location       []Location      `yaml:"location" json:"location"`
 }
 
+
 type Location struct {
 	Path           string          `yaml:"path" json:"path"`
 	Method         string          `yaml:"method" json:"method"`
