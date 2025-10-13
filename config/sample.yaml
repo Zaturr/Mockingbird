@@ -13,6 +13,7 @@ http:
       location:
         - path: /
           method: GET
+          schema: '{}'
           static_dir: "samplesite"
           response: '{"message": "Hello, World!"}'
           status_code: 200
@@ -44,6 +45,7 @@ http:
           status_code: 200
           headers:
             Content-Type: application/json
+            chaos_injection: 'chaos1'
     - listen: 5091
       logger: true
       name: "VISOR_API"
@@ -56,6 +58,9 @@ http:
           status_code: 200
           headers:
             Content-Type: application/json
+      chaos_injection:
+        probability: 100
+        status_code: 500
     - listen: 8102
       logger: true
       name: "SYCOM"

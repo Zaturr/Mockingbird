@@ -51,8 +51,8 @@ func (m *Manager) CreateServers(config *models.MockServer) error {
 }
 
 // CreateServer creates a single server based on the configuration
-func (m *Manager) CreateServer(config models.Server) error {
-	// Check if server already exists
+
+func (m *Manager) CreateServer(config models.Server) error { // Check if server already exists
 	if _, exists := m.servers[config.Listen]; exists {
 		return fmt.Errorf("server on port %d already exists", config.Listen)
 	}

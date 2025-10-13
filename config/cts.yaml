@@ -1,0 +1,107 @@
+http:
+  servers:
+  - listen: 8003
+    logger: true
+    logger_path: "./log/cts"
+    name: "CTS_MOCK"
+    version: "VERSION OTP"
+    location:
+      - path: /CTSProxy/services/resources/sypago/paymentKeyRequest
+        status_code: 200
+        method: POST
+        headers:
+          Content-Type: application/json
+        schema: |
+          {
+            "type": "object",
+            "properties": {
+              "monAbrev": {
+                "type": "string",
+                "description": "Must be 'VES'",
+                "pattern": "^VES$",
+                "minLength": 3,
+                "maxLength": 3
+              },
+              "monto": {
+                "type": "string"
+              },
+              "codBanco": {
+                "type": "integer"
+              },
+              "telefono": {
+                "type": "string"
+              },
+              "identificacionClienteOrigen": {
+                "type": "string",
+                "description": "Must start with V, E, J, P, or C.",
+                "pattern": "^[VEJPC][0-9]+"
+              },
+              "identificacionClienteDestino": {
+                "type": "string",
+                "description": "Must start with V, E, J, P, or C.",
+                "pattern": "^[VEJPC][0-9]+"
+              },
+              "cuentaDestino": {
+                "type": "string",
+                "description": "Must be 20 digits long.",
+                "pattern": "^[0-9]{20}$",
+                "minLength": 20,
+                "maxLength": 20
+              }
+            },
+            "required": [
+              "monAbrev",
+              "monto",
+              "codBanco",
+              "telefono",
+              "identificacionClienteOrigen",
+              "identificacionClienteDestino",
+              "cuentaDestino"
+            ],
+            "additionalProperties": false
+          }
+        response: |
+          {
+            "success": true,
+            "message": null,
+            "msgId": "0114012025091015211102107005"
+          }
+      - path: /CTSProxy/services/resources/sypago/debitTransaction
+        method: POST
+        status_code: 200
+        headers:
+          Content-Type: application/json
+        schema: |
+          {
+            "type": "object",
+            "properties": {
+              "tipoServicio": {"type": "string"},
+              "subTipoOperacion": {"type": "string"},
+              "identificacionClienteOrigen": {"type": "string", "pattern": "^[VEJPC][0-9]+"},
+              "identificacionClienteDestino": {"type": "string", "pattern": "^[VEJPC][0-9]+"},
+              "monedaOrigen": {"type": "integer"},
+              "monedaDestino": {"type": "integer"},
+              "cuentaOrigen": {"type": "string", "pattern": "^[0-9]{20}$"},
+              "cuentaDestino": {"type": "string", "pattern": "^[0-9]{20}$"},
+              "monto": {"type": ["number", "string"]},
+              "concepto": {"type": "string"},
+              "codBanco": {"type": "integer"},
+              "nombreClienteOrigen": {"type": "string"},
+              "nombreClienteDestino": {"type": "string"},
+              "telefono": {"type": "string"},
+              "contrato": {"type": "string"},
+              "factura": {"type": "string"},
+              "monAbrev": {"type": "string", "pattern": "^VES$"},
+              "tipoDoc": {"type": "string"},
+              "otp": {"type": "string", "description": "8 digits only string", "pattern": "^[0-9]{8}$"}
+            },
+            "required": ["tipoServicio", "subTipoOperacion", "identificacionClienteOrigen", "identificacionClienteDestino", "monedaOrigen", "monedaDestino", "cuentaOrigen", "cuentaDestino", "monto", "concepto", "codBanco", "monAbrev", "otp"]
+          }
+        response: |
+          {
+            "success": true,
+            "message": null,
+            "status": "ACCP",
+            "reason": " ",
+            "idEndToEnd": "0114200601021504050000000000"
+          }
