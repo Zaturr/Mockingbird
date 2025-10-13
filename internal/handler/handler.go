@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"strings"
 	"text/template"
@@ -308,7 +309,8 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 	}
 
 	// Parse request body to extract data for template variables
-	var requestData interface{}
+	// Utilizamos map[string]interface{} para que las propiedades del JSON (como .Amount) sean accesibles
+	var requestData map[string]interface{}
 	if c.Request.Body != nil {
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
@@ -319,13 +321,14 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
 
 		if len(body) > 0 {
+			// Intentamos hacer Unmarshal en un mapa para facilitar el acceso por nombre de campo
 			if err := json.Unmarshal(body, &requestData); err != nil {
 				return "", fmt.Errorf("error parsing request JSON: %w", err)
 			}
 		}
 	}
 
-	// Create template with custom functions
+	// Create template with custom functions (incluyendo randInt y now que devuelve time.Time)
 	tmpl, err := template.New("response").Funcs(template.FuncMap{
 		"toJson": func(v interface{}) string {
 			jsonBytes, err := json.Marshal(v)
@@ -334,8 +337,15 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 			}
 			return string(jsonBytes)
 		},
-		"now": func() string {
-			return time.Now().Format(time.RFC3339)
+		// Devuelve un objeto time.Time para que la plantilla pueda llamar a .Format
+		"now": func() time.Time {
+			return time.Now()
+		},
+		// Agrega la función randInt necesaria para generar números aleatorios
+		"randInt": func(min, max int) int {
+			// Nota: La siembra de rand debería idealmente hacerse una sola vez al inicio del programa.
+			rand.Seed(time.Now().UnixNano())
+			return rand.Intn(max-min) + min
 		},
 	}).Parse(responseTemplate)
 
@@ -343,9 +353,10 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 		return "", fmt.Errorf("error parsing template: %w", err)
 	}
 
-	// Execute template with request data
+	// Execute template with request data (map[string]interface{} pasado como contexto raíz)
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, requestData); err != nil {
+		// Si el error persiste aquí, es probable que la sintaxis de la plantilla (YAML) sea el problema.
 		return "", fmt.Errorf("error executing template: %w", err)
 	}
 
