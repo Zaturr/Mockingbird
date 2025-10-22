@@ -16,7 +16,7 @@ func TestHandleRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	// Create a new handler
-	h := NewHandler()
+	h := NewHandler(nil, nil)
 
 	// Test cases
 	tests := []struct {
@@ -121,7 +121,7 @@ func TestSchemaValidation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	// Create a new handler
-	h := NewHandler()
+	h := NewHandler(nil, nil)
 
 	// Define a location with schema validation
 	location := models.Location{

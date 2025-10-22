@@ -1,16 +1,20 @@
 package main
 
 import (
+	"catalyst/database"
 	postgres_server "catalyst/internal/postgres"
 	"flag"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"catalyst/internal/config"
 	"catalyst/internal/models"
 	"catalyst/internal/server"
+
+	_ "modernc.org/sqlite"
 )
 
 func main() {
@@ -48,7 +52,12 @@ func main() {
 	// Create server manager
 	manager := server.NewManager()
 	postgresManager := postgres_server.NewPostgresManager()
-	// Create servers from configurations
+
+	configDirPath := *configDir
+	if configDirPath == "" {
+		configDirPath = config.GetConfigDir()
+	}
+
 	for _, cfg := range configs {
 		if err := manager.CreateServers(cfg); err != nil {
 			log.Fatalf("Error creating http servers: %v", err)
@@ -58,12 +67,42 @@ func main() {
 		}
 	}
 
-	// Start all servers
+	// Create batch manager for API server
+	db, err := database.InitDB("./database.db")
+	if err != nil {
+		log.Fatalf("Error initializing database for API: %v", err)
+	}
+
+	batchConfig := database.BatchConfig{
+		BatchSize:     20,
+		FlushInterval: 2 * time.Second,
+		MaxQueueSize:  50000,
+		MaxBatchQueue: 50000,
+		MaxWorkers:    3,
+		Timeout:       30 * time.Second,
+		RetryAttempts: 3,
+	}
+	batchManager := database.NewBatchManager(db, batchConfig)
+
+	// Start batch manager
+	if err := batchManager.Start(); err != nil {
+		log.Fatalf("Error starting batch manager for API: %v", err)
+	}
+
+	if err := manager.CreateAPIServer(batchManager, configDirPath); err != nil {
+		log.Fatalf("Error creating API server: %v", err)
+	}
+
 	if err := manager.Start(); err != nil {
 		log.Fatalf("Error starting servers: %v", err)
 	}
 
+	if err := manager.StartAPIServer(); err != nil {
+		log.Fatalf("Error starting API server: %v", err)
+	}
+
 	log.Println("All HTTP servers started successfully")
+	log.Println("API server started on port 8282")
 
 	if err := postgresManager.Start(); err != nil {
 		log.Fatalf("Error starting postgres servers: %v", err)
@@ -71,7 +110,6 @@ func main() {
 
 	log.Println("All postgres servers started successfully")
 
-	// Wait for interrupt signal to gracefully shut down the servers
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

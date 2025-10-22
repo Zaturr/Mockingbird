@@ -11,6 +11,8 @@ import (
 	"text/template"
 	"time"
 
+	"catalyst/database"
+
 	"catalyst/internal/chaos"
 	"catalyst/internal/models"
 
@@ -22,17 +24,19 @@ import (
 
 // Handler manages HTTP request handling based on configuration
 type Handler struct {
-	chaosEngine *chaos.Engine
-	schemas     map[string]*jsonschema.Schema
-	Logger      *scribe.Scribe
+	chaosEngine  *chaos.Engine
+	schemas      map[string]*jsonschema.Schema
+	Logger       *scribe.Scribe
+	BatchManager *database.BatchManager
 }
 
 // NewHandler creates a new handler with the given chaos engine
-func NewHandler(logger *scribe.Scribe) *Handler {
+func NewHandler(logger *scribe.Scribe, batchManager *database.BatchManager) *Handler {
 	return &Handler{
-		chaosEngine: chaos.NewEngine(),
-		schemas:     make(map[string]*jsonschema.Schema),
-		Logger:      logger,
+		chaosEngine:  chaos.NewEngine(),
+		schemas:      make(map[string]*jsonschema.Schema),
+		Logger:       logger,
+		BatchManager: batchManager,
 	}
 }
 
@@ -110,7 +114,9 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 	if location.ChaosInjection != nil {
 		if h.chaosEngine.ApplyChaos(c.Writer, location.ChaosInjection) {
 			h.Logger.WarnCtx(ctx).Msg("Request aborted by chaos injection")
-			return // Request was aborted by chaos injection
+			// Insertar en BD con el status code modificado por chaos
+			h.insertTransactionToDB(c, location)
+			return
 		}
 	}
 
@@ -119,6 +125,8 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 		if err := h.validateRequestBody(c, schema); err != nil {
 			h.Logger.ErrorCtx(ctx).AnErr("validation_error", err).Msg("Schema validation failed")
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Schema validation failed: %v", err)})
+			// Insertar en BD con el status code real (400)
+			h.insertTransactionToDB(c, location)
 			return
 		}
 	}
@@ -151,6 +159,8 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 		if err != nil {
 			h.Logger.ErrorCtx(ctx).AnErr("template_error", err).Msg("Error processing response template")
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error processing response template"})
+			// Insertar en BD con el status code real (500)
+			h.insertTransactionToDB(c, location)
 			return
 		}
 
@@ -161,6 +171,9 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 	h.Logger.InfoCtx(ctx).
 		Int("status_code", location.StatusCode).
 		Msg("Request completed successfully")
+
+	// Insertar en BD al finalizar la operación (casos exitosos)
+	h.insertTransactionToDB(c, location)
 }
 
 // validateRequestBody validates the request body against a JSON schema
@@ -171,7 +184,6 @@ func (h *Handler) validateRequestBody(c *gin.Context, schema *jsonschema.Schema)
 
 	// Read the request body
 	body, err := io.ReadAll(c.Request.Body)
-
 	if err != nil {
 		h.Logger.ErrorCtx(ctx).AnErr("error", err).Msg("Error reading request body")
 		return fmt.Errorf("error reading request body: %w", err)
@@ -179,8 +191,6 @@ func (h *Handler) validateRequestBody(c *gin.Context, schema *jsonschema.Schema)
 
 	// Restore the request body for later use
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
-
-	defer c.Request.Body.Close()
 
 	// Parse the JSON
 	var data interface{}
@@ -361,4 +371,139 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 	}
 
 	return buf.String(), nil
+}
+
+// insertTransactionToDB inserta la transacción en la base de datos
+func (h *Handler) insertTransactionToDB(c *gin.Context, location models.Location) {
+	if h.BatchManager == nil {
+		h.Logger.Warn().Msg("BatchManager is nil, skipping database insertion")
+		return
+	}
+
+	// Verificar si BatchManager está corriendo
+	if !h.BatchManager.IsRunning() {
+		h.Logger.Warn().Msg("BatchManager is not running, skipping database insertion")
+		return
+	}
+
+	// Extraer datos del request
+	requestHeaders, _ := json.Marshal(c.Request.Header)
+	requestBody := h.getRequestBody(c)
+	responseHeaders, _ := json.Marshal(c.Writer.Header())
+	responseBody := h.getActualResponseBody(c, location)
+
+	// Obtener el status code real del response writer
+	actualStatusCode := h.getActualStatusCode(c)
+
+	// Crear Mockdata
+	recepcionID := c.GetHeader("X-Recepcion-ID")
+	if recepcionID == "" {
+		recepcionID = uuid.New().String()
+	}
+
+	senderID := c.GetHeader("X-Sender-ID")
+	if senderID == "" {
+		senderID = uuid.New().String()
+	}
+
+	operation := &database.Mockdata{
+		UUID:               uuid.New().String(),
+		RecepcionID:        recepcionID,
+		SenderID:           senderID,
+		RequestHeaders:     string(requestHeaders),
+		RequestMethod:      c.Request.Method,
+		RequestEndpoint:    c.Request.URL.Path,
+		RequestBody:        requestBody,
+		ResponseHeaders:    string(responseHeaders),
+		ResponseBody:       responseBody,
+		ResponseStatusCode: actualStatusCode,
+		Timestamp:          time.Now(),
+	}
+
+	// Insertar en batch
+	if err := h.BatchManager.AddOperation(operation); err != nil {
+		h.Logger.Error().
+			Str("uuid", operation.UUID).
+			Str("recepcion_id", operation.RecepcionID).
+			AnErr("error", err).
+			Msg("Error inserting transaction to database")
+	} else {
+		h.Logger.Info().
+			Str("uuid", operation.UUID).
+			Str("recepcion_id", operation.RecepcionID).
+			Str("method", operation.RequestMethod).
+			Str("endpoint", operation.RequestEndpoint).
+			Int("status_code", actualStatusCode).
+			Msg("Transaction added to batch successfully")
+	}
+}
+
+// getRequestBody extrae el body del request
+func (h *Handler) getRequestBody(c *gin.Context) string {
+	if c.Request.Body == nil {
+		return ""
+	}
+
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		h.Logger.Error().AnErr("error", err).Msg("Error reading request body for database")
+		return ""
+	}
+
+	// Restaurar el body para uso posterior
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+	return string(body)
+}
+
+// getResponseBody extrae el body de la respuesta
+func (h *Handler) getResponseBody(c *gin.Context, location models.Location) string {
+	if location.Response == "" {
+		return ""
+	}
+
+	// Procesar template si existe
+	responseBody, err := h.processResponseTemplate(c, string(location.Response))
+	if err != nil {
+		return string(location.Response)
+	}
+
+	return responseBody
+}
+
+// getActualStatusCode obtiene el status code real del response writer
+func (h *Handler) getActualStatusCode(c *gin.Context) int {
+	// En Gin, el status code se puede obtener del response writer
+	// Si no se ha establecido, devuelve 200 por defecto
+	if c.Writer.Status() == 0 {
+		return 200
+	}
+	return c.Writer.Status()
+}
+
+// getActualResponseBody obtiene el response body real que se envió al cliente
+func (h *Handler) getActualResponseBody(c *gin.Context, location models.Location) string {
+	// Verificar si el chaos injection se activó
+	// Si el status code es diferente al configurado, significa que hubo chaos injection
+	actualStatusCode := h.getActualStatusCode(c)
+
+	// Si hay chaos injection activado (status code diferente al configurado)
+	if location.ChaosInjection != nil && actualStatusCode != location.StatusCode {
+		// Para casos de chaos injection, devolver el response del chaos config
+		if location.ChaosInjection.Error.Response != "" {
+			return location.ChaosInjection.Error.Response
+		}
+		// Si no hay response específico en chaos, devolver string vacío
+		return ""
+	}
+
+	// Para casos normales (sin chaos injection), usar el response configurado
+	if location.Response != "" {
+		responseBody, err := h.processResponseTemplate(c, string(location.Response))
+		if err != nil {
+			return string(location.Response)
+		}
+		return responseBody
+	}
+
+	return ""
 }

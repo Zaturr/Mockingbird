@@ -1,107 +1,204 @@
 http:
-  servers:
-  - listen: 8003
-    logger: true
-    logger_path: "./log/cts"
-    name: "CTS_MOCK"
-    version: "VERSION OTP"
-    location:
-      - path: /CTSProxy/services/resources/sypago/paymentKeyRequest
-        status_code: 200
-        method: POST
-        headers:
-          Content-Type: application/json
-        schema: |
-          {
-            "type": "object",
-            "properties": {
-              "monAbrev": {
-                "type": "string",
-                "description": "Must be 'VES'",
-                "pattern": "^VES$",
-                "minLength": 3,
-                "maxLength": 3
-              },
-              "monto": {
-                "type": "string"
-              },
-              "codBanco": {
-                "type": "integer"
-              },
-              "telefono": {
-                "type": "string"
-              },
-              "identificacionClienteOrigen": {
-                "type": "string",
-                "description": "Must start with V, E, J, P, or C.",
-                "pattern": "^[VEJPC][0-9]+"
-              },
-              "identificacionClienteDestino": {
-                "type": "string",
-                "description": "Must start with V, E, J, P, or C.",
-                "pattern": "^[VEJPC][0-9]+"
-              },
-              "cuentaDestino": {
-                "type": "string",
-                "description": "Must be 20 digits long.",
-                "pattern": "^[0-9]{20}$",
-                "minLength": 20,
-                "maxLength": 20
-              }
-            },
-            "required": [
-              "monAbrev",
-              "monto",
-              "codBanco",
-              "telefono",
-              "identificacionClienteOrigen",
-              "identificacionClienteDestino",
-              "cuentaDestino"
-            ],
-            "additionalProperties": false
-          }
-        response: |
-          {
-            "success": true,
-            "message": null,
-            "msgId": "0114012025091015211102107005"
-          }
-      - path: /CTSProxy/services/resources/sypago/debitTransaction
-        method: POST
-        status_code: 200
-        headers:
-          Content-Type: application/json
-        schema: |
-          {
-            "type": "object",
-            "properties": {
-              "tipoServicio": {"type": "string"},
-              "subTipoOperacion": {"type": "string"},
-              "identificacionClienteOrigen": {"type": "string", "pattern": "^[VEJPC][0-9]+"},
-              "identificacionClienteDestino": {"type": "string", "pattern": "^[VEJPC][0-9]+"},
-              "monedaOrigen": {"type": "integer"},
-              "monedaDestino": {"type": "integer"},
-              "cuentaOrigen": {"type": "string", "pattern": "^[0-9]{20}$"},
-              "cuentaDestino": {"type": "string", "pattern": "^[0-9]{20}$"},
-              "monto": {"type": ["number", "string"]},
-              "concepto": {"type": "string"},
-              "codBanco": {"type": "integer"},
-              "nombreClienteOrigen": {"type": "string"},
-              "nombreClienteDestino": {"type": "string"},
-              "telefono": {"type": "string"},
-              "contrato": {"type": "string"},
-              "factura": {"type": "string"},
-              "monAbrev": {"type": "string", "pattern": "^VES$"},
-              "tipoDoc": {"type": "string"},
-              "otp": {"type": "string", "description": "8 digits only string", "pattern": "^[0-9]{8}$"}
-            },
-            "required": ["tipoServicio", "subTipoOperacion", "identificacionClienteOrigen", "identificacionClienteDestino", "monedaOrigen", "monedaDestino", "cuentaOrigen", "cuentaDestino", "monto", "concepto", "codBanco", "monAbrev", "otp"]
-          }
-        response: |
-          {
-            "success": true,
-            "message": null,
-            "status": "ACCP",
-            "reason": " ",
-            "idEndToEnd": "0114200601021504050000000000"
-          }
+    servers:
+        - listen: 2021
+          location:
+            - headers:
+                Content-Type: application/json
+              method: POST
+              path: /bancrecer/simf/1.0.0/op
+              response: '{ "Amount": {{.Amount}}, "Bank": "Bancrecer", "Currency": "{{.Currency}}", "EndToEndId": "0168{{ now.Format "20060102150405" }}{{ randInt 1000 9999 }}", "Product": "Credito Inmediato", "Date": "{{now.Format "2006 Jan 02"}}", "Time": "09:52 a. m.", "Description": "{{.Description}}", "Reference": "00201511", "Status": "Pagado", "StatusCode": {{randInt 1 6}}, "Destiny": "0100552008080", "Symbol": "Bs.", "Reason": "" }'
+              schema: |
+                {
+                  "$schema": "http://json-schema.org/draft-07/schema#",
+                  "title": "Enviar Transaction Request",
+                  "type": "object",
+                  "required": [
+                    "OriginId",
+                    "OriginAccount",
+                    "DestinyBank",
+                    "DestinyAlias",
+                    "DestinyIdType",
+                    "DestinyId",
+                    "DestinyType",
+                    "DestinyAccount",
+                    "Description",
+                    "Currency",
+                    "Amount",
+                    "Channel",
+                    "AddDirectory",
+                    "IpAddress"
+                  ],
+                  "properties": {
+                    "OriginId": {
+                      "type": "string"
+                    },
+                    "OriginAccount": {
+                      "type": "string"
+                    },
+                    "DestinyBank": {
+                      "type": "string"
+                    },
+                    "DestinyAlias": {
+                      "type": "string"
+                    },
+                    "DestinyIdType": {
+                      "type": "string"
+                    },
+                    "DestinyId": {
+                      "type": "string"
+                    },
+                    "DestinyType": {
+                      "type": "string"
+                    },
+                    "DestinyAccount": {
+                      "type": "string"
+                    },
+                    "Description": {
+                      "type": "string"
+                    },
+                    "Currency": {
+                      "type": "string"
+                    },
+                    "Amount": {
+                      "type": "number",
+                      "format": "double"
+                    },
+                    "Channel": {
+                      "type": "string"
+                    },
+                    "AddDirectory": {
+                      "type": "boolean"
+                    },
+                    "IpAddress": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              status_code: 200
+            - headers:
+                Content-Type: application/json
+              method: POST
+              path: /ddinme/v2/send/otp
+              response: '{ "Date": "{{ now.Format "02/01/2006T15:04:05.000Z" }}", "Reference": "00013719", "EndToEndId": "0168{{ now.Format "20060102150405" }}{{ randInt 100 999 }}", "BankCode": "0168", "Bank": "Bancrecer", "DestinyId": "{{.DestinyId}}", "DestinyType": "{{.DestinyType}}", "Destiny": "{{.DestinyAccount}}", "Symbol": "Bs.", "Amount": {{.Amount}}, "Currency": "{{.Currency}}", "Description": "{{.Description}}", "Status": "Aprobada", "StatusCode": {{randInt 1 6}}, "Reason": "", "ReasonCode": "", "Product": "", "NeedApproval": false }'
+              schema: |
+                {
+                  "$schema": "http://json-schema.org/draft-07/schema#",
+                  "title": "Enviar Transaction Request",
+                  "type": "object",
+                  "required": [
+                    "OriginId",
+                    "OriginAccount",
+                    "DestinyBank",
+                    "DestinyAlias",
+                    "DestinyId",
+                    "DestinyType",
+                    "DestinyAccount",
+                    "Description",
+                    "Currency",
+                    "Amount",
+                    "Channel",
+                    "AddDirectory",
+                    "IpAddress",
+                    "Otp"
+                  ],
+                  "properties": {
+                    "OriginId": {
+                      "type": "string"
+                    },
+                    "OriginAccount": {
+                      "type": "string"
+                    },
+                    "DestinyBank": {
+                      "type": "string"
+                    },
+                    "DestinyAlias": {
+                      "type": "string"
+                    },
+                    "DestinyId": {
+                      "type": "string"
+                    },
+                    "DestinyType": {
+                      "type": "string"
+                    },
+                    "DestinyAccount": {
+                      "type": "string"
+                    },
+                    "Description": {
+                      "type": "string"
+                    },
+                    "Currency": {
+                      "type": "string"
+                    },
+                    "Amount": {
+                      "type": "number",
+                      "format": "double"
+                    },
+                    "Channel": {
+                      "type": "string"
+                    },
+                    "AddDirectory": {
+                      "type": "boolean"
+                    },
+                    "IpAddress": {
+                      "type": "string"
+                    },
+                    "Otp": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              status_code: 200
+            - headers:
+                Content-Type: application/json
+              method: GET
+              path: /debit/v2/operation
+              response: '[ { "OperationDate": "{{ now.Format "2006-01-02T15:04:05" }}", "Reference": "{{ randInt 10000000 99999999 }}", "EndToEndId": "0168{{ now.Format "20060102150405" }}{{ randInt 100 999 }}", "OriginId": "V{{ randInt 100000 999999 }}", "OriginName": "PRUEBA", "OriginAccount": "0168{{ randInt 1000000000000000 9999999999999999 }}", "OriginBank": "0168", "OriginBankName": "Bancrecer", "DestinyBank": "0168", "DestinyBankName": "Bancrecer", "DestinyAccount": "0168{{ randInt 1000000000000000 9999999999999999 }}", "Symbol": "Bs.", "Amount": {{ randInt 1 10000 }}, "Currency": "VES", "Description": "Prueba", "StatusCode": {{ randInt 1 6 }}, "Status": "{{ if eq (randInt 1 3) 1 }}Aprobado{{ else if eq (randInt 1 3) 2 }}Pendiente{{ else }}Rechazado{{ end }}", "StatusIcon": "highlight_off", "StatusCss": "{{ if eq (randInt 1 3) 1 }}StatusApprove{{ else if eq (randInt 1 3) 2 }}StatusPending{{ else }}StatusReject{{ end }}", "DestinyIdType": "SCID", "DestinyId": "V{{ randInt 100000 999999 }}", "DestinyName": "Prueba", "DestinyType": "CNTA", "Service": "Debito Inmediato", "Message": "", "Mask": "0000-0000-00-0000000000", "CanApprove": {{ if eq (randInt 1 2) 1 }}true{{ else }}false{{ end }}, "ReasonCode": "", "Reason": "" } ]'
+              status_code: 200
+            - headers:
+                Content-Type: application/json
+              method: GET
+              path: /debit/v2/operations/date
+              response: '[ { "OperationDate": "{{ now.Format "2006-01-02T15:04:05" }}", "Reference": "{{ randInt 10000000 99999999 }}", "EndToEndId": "0168{{ now.Format "20060102150405" }}{{ randInt 100 999 }}", "OriginId": "V{{ randInt 100000 999999 }}", "OriginName": "PRUEBA", "OriginAccount": "0168{{ randInt 1000000000000000 9999999999999999 }}", "OriginBank": "0168", "OriginBankName": "Bancrecer", "DestinyBank": "0168", "DestinyBankName": "Bancrecer", "DestinyAccount": "0168{{ randInt 1000000000000000 9999999999999999 }}", "Symbol": "Bs.", "Amount": {{ randInt 1 10000 }}, "Currency": "VES", "Description": "Prueba", "StatusCode": {{ randInt 1 6 }}, "Status": "{{ if eq (randInt 1 3) 1 }}Aprobado{{ else if eq (randInt 1 3) 2 }}Pendiente{{ else }}Rechazado{{ end }}", "StatusIcon": "highlight_off", "StatusCss": "{{ if eq (randInt 1 3) 1 }}StatusApprove{{ else if eq (randInt 1 3) 2 }}StatusPending{{ else }}StatusReject{{ end }}", "DestinyIdType": "SCID", "DestinyId": "V{{ randInt 100000 999999 }}", "DestinyName": "Prueba", "DestinyType": "CNTA", "Service": "Debito Inmediato", "Message": "", "Mask": "0000-0000-00-0000000000", "CanApprove": {{ if eq (randInt 1 2) 1 }}true{{ else }}false{{ end }}, "ReasonCode": "", "Reason": "" } ]'
+              status_code: 200
+            - headers:
+                Content-Type: application/json
+              method: POST
+              path: /bancrecer/simf/1.0.0/operaciones
+              response: '[ { "OperationId": {{ randInt 100000 999999 }}, "UserCore": 0, "UserName": "USUARIO {{.identification}}", "UserIdentification": "{{.identification}}", "Channel": "{{.channel}}", "OriginBank": "0168", "OriginBankName": "Bancrecer", "OriginName": "PRUEBA", "OriginIdType": "SCID", "OriginId": "{{.identification}}", "OriginType": "CNTA", "OriginAccount": "0168{{ randInt 1000000000000000 9999999999999999 }}", "OriginAccountType": "CTE", "DestinyBank": "0134", "DestinyBankName": "Banesco", "DestinyIdType": "SCID", "DestinyId": "V{{ randInt 10000000 99999999 }}", "DestinyName": "BENEFICIARIO {{ randInt 1 10 }}", "DestinyType": "{{ if eq (randInt 1 2) 1 }}CELE{{ else }}CNTA{{ end }}", "DestinyAccount": "{{ randInt 10000000000 99999999999 }}", "DestinyAccountType": "{{ if eq (randInt 1 2) 1 }}CELE{{ else }}CTE{{ end }}", "ProductId": 0, "EndToEndId": "0168{{ now.Format "20060102150405" }}{{ randInt 100 999 }}", "OriginEndToEndId": "", "Reference": "{{ randInt 10000000 99999999 }}", "OperationDate": "{{ now.Format "2006-01-02T15:04:05" }}", "Amount": {{ randInt 1 10000 }}.{{ randInt 10 99 }}, "Currency": "VES", "CurrencyCode": {{ randInt 0 10 }}, "StatusCode": {{ randInt 1 6 }}, "Status": "{{ if eq (randInt 1 3) 1 }}Pagado{{ else if eq (randInt 1 3) 2 }}Pendiente{{ else }}Rechazado{{ end }}", "Service": "{{ if eq (randInt 1 3) 1 }}Crédito Inmediato{{ else if eq (randInt 1 3) 2 }}Débito Inmediato{{ else }}Transferencia{{ end }}", "Description": "prueba de {{.month}}", "ReasonCode": "", "Reason": "", "Symbol": "Bs.", "TrxDb": {{ randInt 0 1000 }}, "TrxCr": {{ randInt 0 1000 }}, "MessageId": "", "Mask": "", "CanApprove": {{.canReverse}} } ]'
+              schema: |
+                {
+                  "$schema": "http://json-schema.org/draft-07/schema#",
+                  "title": "Operation List Request",
+                  "type": "object",
+                  "required": [
+                    "channel",
+                    "identification",
+                    "month",
+                    "canReverse"
+                  ],
+                  "properties": {
+                    "channel": {
+                      "type": "string"
+                    },
+                    "identification": {
+                      "type": "string"
+                    },
+                    "month": {
+                      "type": "string"
+                    },
+                    "canReverse": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              status_code: 200
+          logger: true
+          logger_path: ./log/bancrecer
+          name: BANCRECER
+          version: 0.0.1
+new_field: added_from_postman
+restart_test: trigger_restart
+test_setting: new_value
