@@ -1,114 +1,110 @@
-network:
-  ip:
-    - "172.24.15.10"
-    - ""
-    - ""
+
 http:
   servers:
-    - listen: 8101
-      logger: true
-      name: "MAIN"
-      logger_path: "./log/main"
-      version: "0.0.1"
-      location:
-        - path: /
-          method: GET
-          schema: '{}'
-          static_dir: "samplesite"
-          response: '{"message": "Hello, World!"}'
-          status_code: 200
-          Content-Type: application/json
-      chaos_injection:
-          probability: 50
-          status_code: 500
-    - listen: 3005
-      logger: true
-      name: "GRAFANA"
-      logger_path: "./log/grafana"
-      version: "0.0.1"
-      location:
-        - path: /grafana
-          method: GET
-          response: '{"message": "Hello, World!"}'
-          status_code: 200
-          headers:
-            Content-Type: application/json
-    - listen: 5090
-      logger: true
-      name: "VISOR"
-      logger_path: "./log/visor"
-      version: "0.0.1"
-      location:
-        - path: /
-          method: GET
-          response: '{"message": "Hello, World!"}'
-          status_code: 200
-          headers:
-            Content-Type: application/json
-            chaos_injection: 'chaos1'
-    - listen: 5091
-      logger: true
-      name: "VISOR_API"
-      logger_path: "./log/visor_api"
-      version: "0.0.1"
-      location:
-        - path: /
-          method: GET
-          response: '{"message": "Hello, World!"}'
-          status_code: 200
-          headers:
-            Content-Type: application/json
-      chaos_injection:
-        probability: 100
-        status_code: 500
-    - listen: 8102
-      logger: true
-      name: "SYCOM"
-      logger_path: "./log/sycom"
-      version: "0.0.1"
-      location:
-        - path: /sycom
-          method: GET
-          response: '{"message": "Hello, World!"}'
-          status_code: 200
-          headers:
-            Content-Type: application/json
-    - listen: 8085
-      logger: true
-      name: "AUTH"
-      logger_path: "./log/auth"
-      version: "0.0.1"
-      location:
-        - path: /
-          method: GET
-          response: '{"message": "Hello, World!"}'
-          status_code: 200
-          headers:
-            Content-Type: application/json
-    - listen: 8082
-      logger: true
-      name: "ANOTHERAPI"
-      logger_path: "./log/auth"
-      version: "0.0.1"
-      location:
-        - path: /
-          method: GET
-          response: '{"message": "Hello, World!"}'
-          status_code: 200
-          headers:
-            Content-Type: application/json
-    - listen: 3500
-      logger: true
-      name: "CHECKOUT"
-      logger_path: "./log/checkout"
-      version: "0.0.1"
-      location:
-        - path: /
-          method: GET
-          response: '{"message": "Hello, World!"}'
-          status_code: 200
-          headers:
-            Content-Type: application/json
+        - listen: 8101
+          logger: true
+          name: "MAIN"
+          logger_path: "./log/main"
+          version: "0.0.1"
+          location:
+            - path: /
+              method: GET
+              schema: '{}'
+              static_dir: "samplesite"
+              response: '{"message": "Hello, World!"}'
+              status_code: 200
+              Content-Type: application/json
+          chaos_injection:
+              probability: 50
+              status_code: 500
+        - listen: 3005
+          logger: true
+          name: "GRAFANA"
+          logger_path: "./log/grafana"
+          version: "0.0.1"
+          location:
+            - path: /grafana
+              method: GET
+              response: '{"message": "Hello, World!"}'
+              status_code: 200
+              headers:
+                Content-Type: application/json
+        - listen: 5090
+          logger: true
+          name: "VISOR"
+          logger_path: "./log/visor"
+          version: "0.0.1"
+          location:
+            - path: /
+              method: GET
+              response: '{"message": "Hello, World!"}'
+              status_code: 200
+              headers:
+                Content-Type: application/json
+                chaos_injection: 'chaos1'
+        - listen: 5091
+          logger: true
+          name: "VISOR_API"
+          logger_path: "./log/visor_api"
+          version: "0.0.1"
+          location:
+            - path: /
+              method: GET
+              response: '{"message": "Hello, World!"}'
+              status_code: 200
+              headers:
+                Content-Type: application/json
+          chaos_injection:
+            probability: 100
+            status_code: 500
+        - listen: 8102
+          logger: true
+          name: "SYCOM"
+          logger_path: "./log/sycom"
+          version: "0.0.1"
+          location:
+            - path: /sycom
+              method: GET
+              response: '{"message": "Hello, World!"}'
+              status_code: 200
+              headers:
+                Content-Type: application/json
+        - listen: 8085
+          logger: true
+          name: "AUTH"
+          logger_path: "./log/auth"
+          version: "0.0.1"
+          location:
+            - path: /
+              method: GET
+              response: '{"message": "Hello, World!"}'
+              status_code: 200
+              headers:
+                Content-Type: application/json
+        - listen: 8082
+          logger: true
+          name: "ANOTHERAPI"
+          logger_path: "./log/auth"
+          version: "0.0.1"
+          location:
+            - path: /
+              method: GET
+              response: '{"message": "Hello, World!"}'
+              status_code: 200
+              headers:
+                Content-Type: application/json
+        - listen: 3500
+          logger: true
+          name: "CHECKOUT"
+          logger_path: "./log/checkout"
+          version: "0.0.1"
+          location:
+            - path: /
+              method: GET
+              response: '{"message": "Hello, World!"}'
+              status_code: 200
+              headers:
+                Content-Type: application/json
 postgres:
     servers:
       - name: 'pgA'

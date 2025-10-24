@@ -345,47 +345,57 @@ func (m *Manager) restartServerAttempt(serverName string) error {
 		return fmt.Errorf("error recargando configuración: %w", err)
 	}
 
-	// 2. Encontrar servidor específico por nombre en configuraciones almacenadas
+	// 2. Encontrar servidor específico por puerto actual en configuración recargada
 	var targetPort int
 	var targetServer *Server
+	var targetServerConfig models.Server
 
-	// Buscar en configuraciones almacenadas primero
+	// Primero, encontrar el servidor actual por puerto en configuraciones almacenadas
 	for _, storedConfig := range m.configs {
 		for _, serverConfig := range storedConfig.Http.Servers {
-			// Búsqueda case-insensitive
+			// Buscar servidor que coincida con el nombre del archivo
 			if strings.EqualFold(*serverConfig.Name, serverName) {
 				targetPort = serverConfig.Listen
-				log.Printf("DEBUG: Servidor encontrado en configuración - nombre: %s, puerto: %d", *serverConfig.Name, targetPort)
-
-				// Buscar servidor en todos los puertos disponibles
-				for port, server := range m.servers {
-					if port == targetPort {
-						targetServer = server
-						log.Printf("DEBUG: Servidor encontrado en puerto %d", port)
-						break
-					}
-				}
-
-				if targetServer != nil {
-					break
-				} else {
-					log.Printf("DEBUG: Servidor no encontrado en puerto %d. Puertos disponibles: %v", targetPort, func() []int {
-						ports := make([]int, 0, len(m.servers))
-						for port := range m.servers {
-							ports = append(ports, port)
-						}
-						return ports
-					}())
-				}
+				log.Printf("DEBUG: Servidor actual encontrado - nombre: %s, puerto: %d", *serverConfig.Name, targetPort)
+				break
 			}
 		}
-		if targetServer != nil {
+		if targetPort != 0 {
+			break
+		}
+	}
+
+	if targetPort == 0 {
+		return fmt.Errorf("servidor %s no encontrado en configuraciones almacenadas", serverName)
+	}
+
+	// Buscar el servidor en ejecución por puerto
+	for port, server := range m.servers {
+		if port == targetPort {
+			targetServer = server
+			log.Printf("DEBUG: Servidor encontrado en puerto %d", port)
 			break
 		}
 	}
 
 	if targetServer == nil {
-		return fmt.Errorf("servidor %s no encontrado para reiniciar", serverName)
+		log.Printf("DEBUG: Servidor no encontrado en puerto %d. Puertos disponibles: %v", targetPort, func() []int {
+			ports := make([]int, 0, len(m.servers))
+			for port := range m.servers {
+				ports = append(ports, port)
+			}
+			return ports
+		}())
+		return fmt.Errorf("servidor %s no encontrado en puerto %d", serverName, targetPort)
+	}
+
+	// Buscar la nueva configuración del servidor en la configuración recargada
+	for _, serverConfig := range config.Http.Servers {
+		if strings.EqualFold(*serverConfig.Name, serverName) {
+			targetServerConfig = serverConfig
+			log.Printf("DEBUG: Nueva configuración encontrada - nombre: %s, puerto: %d", *serverConfig.Name, serverConfig.Listen)
+			break
+		}
 	}
 
 	// 3. Detener servidor específico
@@ -398,41 +408,59 @@ func (m *Manager) restartServerAttempt(serverName string) error {
 	}
 
 	// 5. Crear nuevo servidor con configuración actualizada
-	for _, serverConfig := range config.Http.Servers {
-		// Búsqueda case-insensitive para encontrar el servidor correcto
-		if strings.EqualFold(*serverConfig.Name, serverName) {
-			log.Printf("DEBUG: Creando servidor con configuración actualizada - nombre: %s, puerto: %d", *serverConfig.Name, serverConfig.Listen)
+	log.Printf("DEBUG: Creando servidor con configuración actualizada - nombre: %s, puerto: %d", *targetServerConfig.Name, targetServerConfig.Listen)
 
-			// Verificar que el puerto esté libre antes de crear
-			if !isPortAvailable(serverConfig.Listen) {
-				return fmt.Errorf("puerto %d aún está ocupado", serverConfig.Listen)
+	// Verificar que el puerto esté libre antes de crear
+	if !isPortAvailable(targetServerConfig.Listen) {
+		return fmt.Errorf("puerto %d aún está ocupado", targetServerConfig.Listen)
+	}
+
+	if err := m.CreateServer(targetServerConfig); err != nil {
+		return fmt.Errorf("error creando servidor actualizado: %w", err)
+	}
+
+	// 6. Obtener referencia al nuevo servidor creado
+	newServer := m.servers[targetServerConfig.Listen]
+	if newServer == nil {
+		return fmt.Errorf("error: nuevo servidor no se creó correctamente")
+	}
+
+	// 7. Iniciar nuevo servidor
+	m.wg.Add(1)
+	go func(s *Server, p int, name string) {
+		defer m.wg.Done()
+		if err := s.Start(); err != nil && err != http.ErrServerClosed {
+			log.Printf("Error iniciando servidor actualizado en puerto %d: %v", p, err)
+		}
+	}(newServer, targetServerConfig.Listen, serverName)
+
+	log.Printf("Servidor %s reiniciado exitosamente en puerto %d", serverName, targetServerConfig.Listen)
+
+	// 8. Actualizar configuración en memoria con la nueva configuración
+	m.updateStoredConfig(serverName, config)
+
+	return nil
+}
+
+// updateStoredConfig actualiza la configuración almacenada en memoria
+func (m *Manager) updateStoredConfig(serverName string, newConfig *models.MockServer) {
+	// Buscar y reemplazar la configuración existente
+	for i, storedConfig := range m.configs {
+		// Verificar si alguna configuración almacenada contiene el servidor
+		for _, serverConfig := range storedConfig.Http.Servers {
+			// Buscar por nombre del servidor
+			if strings.EqualFold(*serverConfig.Name, serverName) {
+				// Reemplazar la configuración almacenada con la nueva
+				m.configs[i] = newConfig
+				log.Printf("DEBUG: Configuración actualizada en memoria para servidor: %s", serverName)
+				return
 			}
-
-			if err := m.CreateServer(serverConfig); err != nil {
-				return fmt.Errorf("error creando servidor actualizado: %w", err)
-			}
-
-			// 6. Obtener referencia al nuevo servidor creado
-			newServer := m.servers[serverConfig.Listen]
-			if newServer == nil {
-				return fmt.Errorf("error: nuevo servidor no se creó correctamente")
-			}
-
-			// 7. Iniciar nuevo servidor
-			m.wg.Add(1)
-			go func(s *Server, p int, name string) {
-				defer m.wg.Done()
-				if err := s.Start(); err != nil && err != http.ErrServerClosed {
-					log.Printf("Error iniciando servidor actualizado en puerto %d: %v", p, err)
-				}
-			}(newServer, serverConfig.Listen, serverName)
-
-			log.Printf("Servidor %s reiniciado exitosamente en puerto %d", serverName, serverConfig.Listen)
-			break
 		}
 	}
 
-	return nil
+	// Si no se encontró, agregar la nueva configuración
+	m.configs = append(m.configs, newConfig)
+	log.Printf("DEBUG: Nueva configuración agregada en memoria para servidor: %s", serverName)
 }
 
 // RestartAPIServer reinicia el servidor API con nueva configuración
