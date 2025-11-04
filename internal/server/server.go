@@ -26,7 +26,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Server represents a single HTTP server instance
 type Server struct {
 	Port       int
 	Router     *gin.Engine
@@ -36,7 +35,6 @@ type Server struct {
 	logger     *scribe.Scribe
 }
 
-// Manager manages multiple server instances
 type Manager struct {
 	servers        map[int]*Server
 	apiServer      *Server
@@ -44,10 +42,9 @@ type Manager struct {
 	wg             sync.WaitGroup
 	configs        []*models.MockServer
 	configDir      string
-	restartManager *api.RestartManager // NUEVO: RestartManager integrado
+	restartManager *api.RestartManager
 }
 
-// NewManager creates a new server manager
 func NewManager() *Manager {
 	return &Manager{
 		servers:     make(map[int]*Server),
@@ -56,7 +53,6 @@ func NewManager() *Manager {
 	}
 }
 
-// CreateServers creates servers based on the configuration
 func (m *Manager) CreateServers(config *models.MockServer) error {
 
 	m.configs = append(m.configs, config)
@@ -69,15 +65,13 @@ func (m *Manager) CreateServers(config *models.MockServer) error {
 	return nil
 }
 
-func (m *Manager) CreateServer(config models.Server) error { // Check if server already exists
+func (m *Manager) CreateServer(config models.Server) error {
 	if _, exists := m.servers[config.Listen]; exists {
 		return fmt.Errorf("server on port %d already exists", config.Listen)
 	}
 
-	// Set Gin mode to release to disable debug logs
 	gin.SetMode(gin.ReleaseMode)
 
-	// Create Gin router
 	router := gin.New()
 
 	var log *scribe.Scribe
@@ -94,16 +88,13 @@ func (m *Manager) CreateServer(config models.Server) error { // Check if server 
 	if err != nil {
 		log = &scribe.Scribe{}
 	}
-	// Add middleware
 	router.Use(gin.Recovery())
 
-	// Initialize database
 	db, err := database.InitDB("./database.db")
 	if err != nil {
 		return fmt.Errorf("error initializing database: %v", err)
 	}
 
-	// Create batch manager
 	batchConfig := database.BatchConfig{
 		BatchSize:     20,
 		FlushInterval: 2 * time.Second,
@@ -115,17 +106,14 @@ func (m *Manager) CreateServer(config models.Server) error { // Check if server 
 	}
 	batchManager := database.NewBatchManager(db, batchConfig)
 
-	// Start batch manager
 	if err := batchManager.Start(); err != nil {
 		return fmt.Errorf("error starting batch manager: %v", err)
 	}
 
-	// Create handler
 	h := handler.NewHandler(log, batchManager)
 
 	h.Logger = log
 
-	// Create server
 	server := &Server{
 		Port:      config.Listen,
 		Router:    router,
@@ -134,21 +122,17 @@ func (m *Manager) CreateServer(config models.Server) error { // Check if server 
 		logger:    log,
 	}
 
-	// Register routes
 	if err := server.registerRoutes(); err != nil {
 		return fmt.Errorf("error registering routes: %w", err)
 	}
 
-	// Store server
 	m.servers[config.Listen] = server
 
 	return nil
 }
 
-// registerRoutes registers all routes for the server
 func (s *Server) registerRoutes() error {
 	for _, location := range s.locations {
-		// Register location with handler for schema compilation
 		if err := s.handler.RegisterLocation(location); err != nil {
 			return fmt.Errorf("error registering location %s: %w", location.Path, err)
 		}
@@ -158,7 +142,6 @@ func (s *Server) registerRoutes() error {
 			//currentPath, _ := os.Getwd()
 			s.Router.Static(location.Path, "/Users/quintero/GolandProjects/Catalyst/config/samplesite")
 		} else {
-			// Create route handler
 			s.Router.Handle(location.Method, location.Path, func(loc models.Location) gin.HandlerFunc {
 				return func(c *gin.Context) {
 					s.handler.HandleRequest(c, loc)
@@ -172,7 +155,6 @@ func (s *Server) registerRoutes() error {
 	return nil
 }
 
-// Start starts all servers
 func (m *Manager) Start() error {
 	for port, server := range m.servers {
 		m.wg.Add(1)
@@ -187,7 +169,6 @@ func (m *Manager) Start() error {
 	return nil
 }
 
-// Start starts the server
 func (s *Server) Start() error {
 	addr := ":" + strconv.Itoa(s.Port)
 	s.httpServer = &http.Server{
@@ -199,9 +180,7 @@ func (s *Server) Start() error {
 	return s.httpServer.ListenAndServe()
 }
 
-// CreateAPIServer creates the API server
 func (m *Manager) CreateAPIServer(batchManager *database.BatchManager, configDir string) error {
-	// Almacenar directorio de configuración
 	m.configDir = configDir
 
 	gin.SetMode(gin.ReleaseMode)
@@ -216,7 +195,6 @@ func (m *Manager) CreateAPIServer(batchManager *database.BatchManager, configDir
 		Router: router,
 	}
 
-	// Crear e inicializar RestartManager dentro del servidor API
 	m.restartManager = api.NewRestartManager(m.restartChan, func(serverName string) error {
 		m.RestartMainServer(serverName)
 		return nil
@@ -225,13 +203,11 @@ func (m *Manager) CreateAPIServer(batchManager *database.BatchManager, configDir
 	return nil
 }
 
-// StartAPIServer starts the API server
 func (m *Manager) StartAPIServer() error {
 	if m.apiServer == nil {
 		return fmt.Errorf("API server not created")
 	}
 
-	// Iniciar RestartManager dentro del servidor API
 	if m.restartManager != nil {
 		m.restartManager.Start()
 		log.Printf("RestartManager started within API server")
@@ -255,11 +231,9 @@ func (m *Manager) StartAPIServer() error {
 	return nil
 }
 
-// RestartMainServer restarts a specific main server
 func (m *Manager) RestartMainServer(serverName string) {
 	log.Printf("Restarting server: %s", serverName)
 
-	// Si es el servidor API, reiniciarlo
 	if strings.EqualFold(serverName, "api") || strings.EqualFold(serverName, "api_server") {
 		if err := m.RestartAPIServer(); err != nil {
 			log.Printf("Error reiniciando servidor API: %v", err)
@@ -269,7 +243,6 @@ func (m *Manager) RestartMainServer(serverName string) {
 		return
 	}
 
-	// Para servidores mock, usar el método específico
 	if err := m.RestartSpecificServer(serverName); err != nil {
 		log.Printf("Error reiniciando servidor %s: %v", serverName, err)
 		log.Printf("Server %s restart failed. Manual restart required to apply new configuration.", serverName)
@@ -278,23 +251,17 @@ func (m *Manager) RestartMainServer(serverName string) {
 	}
 }
 
-// GetRestartChan returns the restart channel
 func (m *Manager) GetRestartChan() chan string {
 	return m.restartChan
 }
 
-// ReloadConfig recarga la configuración de un servidor específico
 func (m *Manager) ReloadConfig(serverName string) (*models.MockServer, error) {
-	// Buscar archivo de configuración por nombre de servidor
 	var configFile string
 
-	// Buscar en el directorio de configuración
 	if m.configDir != "" {
-		// Intentar con extensiones .yml y .yaml
 		extensions := []string{".yml", ".yaml"}
 		for _, ext := range extensions {
 			configFile = filepath.Join(m.configDir, serverName+ext)
-			// Verificar si el archivo existe
 			if _, err := os.Stat(configFile); err == nil {
 				break
 			}
@@ -305,7 +272,6 @@ func (m *Manager) ReloadConfig(serverName string) (*models.MockServer, error) {
 		return nil, fmt.Errorf("configuración no encontrada para el servidor: %s", serverName)
 	}
 
-	// Cargar configuración actualizada
 	config, err := config.LoadConfig(configFile)
 	if err != nil {
 		return nil, fmt.Errorf("error cargando configuración actualizada: %w", err)
@@ -315,9 +281,7 @@ func (m *Manager) ReloadConfig(serverName string) (*models.MockServer, error) {
 	return config, nil
 }
 
-// RestartSpecificServer reinicia un servidor específico con nueva configuración
 func (m *Manager) RestartSpecificServer(serverName string) error {
-	// Intentar reinicio hasta 3 veces
 	maxRetries := 3
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		log.Printf("Intento %d de %d para reiniciar servidor %s", attempt, maxRetries, serverName)
@@ -330,87 +294,98 @@ func (m *Manager) RestartSpecificServer(serverName string) error {
 
 		log.Printf("Intento %d falló: %v", attempt, err)
 		if attempt < maxRetries {
-			time.Sleep(time.Duration(attempt) * time.Second) // Esperar más tiempo en cada intento
+			time.Sleep(time.Duration(attempt) * time.Second)
 		}
 	}
 
 	return fmt.Errorf("servidor %s no pudo reiniciarse después de %d intentos", serverName, maxRetries)
 }
 
-// restartServerAttempt realiza un intento de reinicio del servidor
 func (m *Manager) restartServerAttempt(serverName string) error {
-	// 1. Recargar configuración
 	config, err := m.ReloadConfig(serverName)
 	if err != nil {
 		return fmt.Errorf("error recargando configuración: %w", err)
 	}
 
-	// 2. Encontrar servidor específico por puerto actual en configuración recargada
+	var targetServerConfig models.Server
+	var found bool
+	for _, serverConfig := range config.Http.Servers {
+		if strings.EqualFold(*serverConfig.Name, serverName) {
+			targetServerConfig = serverConfig
+			found = true
+			log.Printf("DEBUG: Nueva configuración encontrada - nombre: %s, puerto: %d", *serverConfig.Name, serverConfig.Listen)
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("servidor %s no encontrado en configuración recargada", serverName)
+	}
+
 	var targetPort int
 	var targetServer *Server
-	var targetServerConfig models.Server
+	newPort := targetServerConfig.Listen
 
-	// Primero, encontrar el servidor actual por puerto en configuraciones almacenadas
-	for _, storedConfig := range m.configs {
-		for _, serverConfig := range storedConfig.Http.Servers {
-			// Buscar servidor que coincida con el nombre del archivo
-			if strings.EqualFold(*serverConfig.Name, serverName) {
-				targetPort = serverConfig.Listen
-				log.Printf("DEBUG: Servidor actual encontrado - nombre: %s, puerto: %d", *serverConfig.Name, targetPort)
+	if server, exists := m.servers[newPort]; exists {
+		targetServer = server
+		targetPort = newPort
+		log.Printf("DEBUG: Servidor encontrado en puerto de configuración recargada - puerto: %d", newPort)
+	} else {
+		for _, storedConfig := range m.configs {
+			for _, serverConfig := range storedConfig.Http.Servers {
+				if strings.EqualFold(*serverConfig.Name, serverName) {
+					oldPort := serverConfig.Listen
+					if oldPort != newPort {
+						if server, exists := m.servers[oldPort]; exists {
+							targetServer = server
+							targetPort = oldPort
+							log.Printf("DEBUG: Servidor encontrado en puerto antiguo - nombre: %s, puerto antiguo: %d, puerto nuevo: %d", *serverConfig.Name, oldPort, newPort)
+							break
+						}
+					}
+				}
+			}
+			if targetServer != nil {
 				break
 			}
 		}
-		if targetPort != 0 {
-			break
+	}
+
+	if targetServer != nil {
+		log.Printf("DEBUG: Deteniendo servidor en puerto %d", targetPort)
+		targetServer.Stop()
+		delete(m.servers, targetPort)
+
+		if targetPort == newPort {
+			if !waitForPortToBeFree(targetPort, 5*time.Second) {
+				return fmt.Errorf("puerto %d no se liberó después de 5 segundos", targetPort)
+			}
+		} else {
+			// Si el puerto cambió, esperar un momento para que se libere el puerto antiguo
+			time.Sleep(500 * time.Millisecond)
 		}
-	}
-
-	if targetPort == 0 {
-		return fmt.Errorf("servidor %s no encontrado en configuraciones almacenadas", serverName)
-	}
-
-	// Buscar el servidor en ejecución por puerto
-	for port, server := range m.servers {
-		if port == targetPort {
-			targetServer = server
-			log.Printf("DEBUG: Servidor encontrado en puerto %d", port)
-			break
-		}
-	}
-
-	if targetServer == nil {
-		log.Printf("DEBUG: Servidor no encontrado en puerto %d. Puertos disponibles: %v", targetPort, func() []int {
+	} else {
+		log.Printf("DEBUG: Servidor no encontrado en ejecución. Puertos disponibles: %v", func() []int {
 			ports := make([]int, 0, len(m.servers))
 			for port := range m.servers {
 				ports = append(ports, port)
 			}
 			return ports
 		}())
-		return fmt.Errorf("servidor %s no encontrado en puerto %d", serverName, targetPort)
+		log.Printf("DEBUG: Servidor no está en ejecución, se creará en puerto %d", newPort)
 	}
 
-	// Buscar la nueva configuración del servidor en la configuración recargada
-	for _, serverConfig := range config.Http.Servers {
-		if strings.EqualFold(*serverConfig.Name, serverName) {
-			targetServerConfig = serverConfig
-			log.Printf("DEBUG: Nueva configuración encontrada - nombre: %s, puerto: %d", *serverConfig.Name, serverConfig.Listen)
-			break
+	// 5. Verificar que el puerto nuevo esté libre antes de crear
+	if targetPort != newPort {
+		// Si el puerto cambió, esperar a que el puerto nuevo esté libre
+		if !waitForPortToBeFree(newPort, 5*time.Second) {
+			return fmt.Errorf("puerto nuevo %d no está disponible después de 5 segundos", newPort)
 		}
 	}
 
-	// 3. Detener servidor específico
-	targetServer.Stop()
-	delete(m.servers, targetPort)
-
-	// 4. Esperar a que el puerto esté libre
-	if !waitForPortToBeFree(targetPort, 5*time.Second) {
-		return fmt.Errorf("puerto %d no se liberó después de 5 segundos", targetPort)
-	}
-
-	// 5. Crear nuevo servidor con configuración actualizada
+	// 6. Crear nuevo servidor con configuración actualizada
 	log.Printf("DEBUG: Creando servidor con configuración actualizada - nombre: %s, puerto: %d", *targetServerConfig.Name, targetServerConfig.Listen)
 
-	// Verificar que el puerto esté libre antes de crear
 	if !isPortAvailable(targetServerConfig.Listen) {
 		return fmt.Errorf("puerto %d aún está ocupado", targetServerConfig.Listen)
 	}
@@ -419,13 +394,11 @@ func (m *Manager) restartServerAttempt(serverName string) error {
 		return fmt.Errorf("error creando servidor actualizado: %w", err)
 	}
 
-	// 6. Obtener referencia al nuevo servidor creado
 	newServer := m.servers[targetServerConfig.Listen]
 	if newServer == nil {
 		return fmt.Errorf("error: nuevo servidor no se creó correctamente")
 	}
 
-	// 7. Iniciar nuevo servidor
 	m.wg.Add(1)
 	go func(s *Server, p int, name string) {
 		defer m.wg.Done()
@@ -435,22 +408,14 @@ func (m *Manager) restartServerAttempt(serverName string) error {
 	}(newServer, targetServerConfig.Listen, serverName)
 
 	log.Printf("Servidor %s reiniciado exitosamente en puerto %d", serverName, targetServerConfig.Listen)
-
-	// 8. Actualizar configuración en memoria con la nueva configuración
 	m.updateStoredConfig(serverName, config)
-
 	return nil
 }
 
-// updateStoredConfig actualiza la configuración almacenada en memoria
 func (m *Manager) updateStoredConfig(serverName string, newConfig *models.MockServer) {
-	// Buscar y reemplazar la configuración existente
 	for i, storedConfig := range m.configs {
-		// Verificar si alguna configuración almacenada contiene el servidor
 		for _, serverConfig := range storedConfig.Http.Servers {
-			// Buscar por nombre del servidor
 			if strings.EqualFold(*serverConfig.Name, serverName) {
-				// Reemplazar la configuración almacenada con la nueva
 				m.configs[i] = newConfig
 				log.Printf("DEBUG: Configuración actualizada en memoria para servidor: %s", serverName)
 				return
@@ -458,34 +423,27 @@ func (m *Manager) updateStoredConfig(serverName string, newConfig *models.MockSe
 		}
 	}
 
-	// Si no se encontró, agregar la nueva configuración
 	m.configs = append(m.configs, newConfig)
 	log.Printf("DEBUG: Nueva configuración agregada en memoria para servidor: %s", serverName)
 }
 
-// RestartAPIServer reinicia el servidor API con nueva configuración
 func (m *Manager) RestartAPIServer() error {
 	log.Printf("Reiniciando servidor API...")
 
-	// Detener servidor API actual
 	if m.apiServer != nil {
 		m.apiServer.Stop()
 		log.Printf("Servidor API detenido")
 	}
 
-	// Esperar a que el puerto se libere
 	if !waitForPortToBeFree(8282, 5*time.Second) {
 		return fmt.Errorf("puerto 8282 no se liberó después de 5 segundos")
 	}
 
-	// El servidor API se reiniciará automáticamente
-	// ya que está en un goroutine separado
 	log.Printf("Servidor API reiniciado exitosamente")
 	return nil
 }
 
 func (m *Manager) Stop() {
-	// Detener RestartManager si existe
 	if m.restartManager != nil {
 		m.restartManager.Stop()
 		log.Printf("RestartManager stopped")
@@ -509,7 +467,6 @@ func (s *Server) Stop() {
 		if err := s.httpServer.Shutdown(ctx); err != nil {
 			log.Printf("Error shutting down server: %v", err)
 		}
-		// Esperar un momento adicional para asegurar que el puerto se libere
 		time.Sleep(100 * time.Millisecond)
 	}
 }
@@ -519,7 +476,6 @@ func (m *Manager) Wait() {
 	m.wg.Wait()
 }
 
-// isPortAvailable verifica si un puerto está disponible
 func isPortAvailable(port int) bool {
 	addr := fmt.Sprintf(":%d", port)
 	ln, err := net.Listen("tcp", addr)
@@ -530,7 +486,6 @@ func isPortAvailable(port int) bool {
 	return true
 }
 
-// waitForPortToBeFree espera hasta que un puerto esté libre
 func waitForPortToBeFree(port int, maxWait time.Duration) bool {
 	deadline := time.Now().Add(maxWait)
 	for time.Now().Before(deadline) {
