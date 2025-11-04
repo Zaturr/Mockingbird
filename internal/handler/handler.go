@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -15,6 +16,7 @@ import (
 
 	"catalyst/internal/chaos"
 	"catalyst/internal/models"
+	prom "catalyst/prometheus"
 
 	"github.com/SOLUCIONESSYCOM/scribe"
 	"github.com/gin-gonic/gin"
@@ -95,6 +97,17 @@ func (h *Handler) compileSchema(schemaStr string) (*jsonschema.Schema, error) {
 
 // HandleRequest handles an HTTP request based on the location configuration
 func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
+	// Start timing for metrics
+	start := time.Now()
+	requestPath := location.Path // Usar location.Path para las métricas si es consistente
+	requestMethod := c.Request.Method
+
+	// Incrementar el gauge de solicitudes activas para este path/method
+	prom.HandlerActiveRequests.WithLabelValues(requestMethod, requestPath).Inc()
+
+	// Asegurarse de que el gauge se decremente al finalizar, sin importar el resultado
+	defer prom.HandlerActiveRequests.WithLabelValues(requestMethod, requestPath).Dec()
+
 	ctx := scribe.WithCtx(c.Request.Context())
 
 	logCtx := scribe.GetLogContext(ctx)
@@ -116,6 +129,14 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 			h.Logger.WarnCtx(ctx).Msg("Request aborted by chaos injection")
 			// Insertar en BD con el status code modificado por chaos
 			h.insertTransactionToDB(c, location)
+
+			// --- FIN DEL HANDLER: CAPTURAR MÉTRICAS DE RESPUESTA ---
+			statusCode := strconv.Itoa(c.Writer.Status()) // Obtener el status code real después de chaos
+			prom.HandlerResquestTotal.WithLabelValues(requestPath, requestMethod, statusCode).Inc()
+			prom.HandlerRequestDuration.WithLabelValues(requestPath, requestMethod, statusCode).Observe(time.Since(start).Seconds())
+			prom.HandlerErrorsTotal.WithLabelValues(requestPath, requestMethod, "chaos_aborted").Inc() // Contar el error
+			// --- FIN DE CAPTURAR MÉTRICAS DE RESPUESTA ---
+
 			return
 		}
 	}
@@ -127,6 +148,14 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Schema validation failed: %v", err)})
 			// Insertar en BD con el status code real (400)
 			h.insertTransactionToDB(c, location)
+
+			// --- FIN DEL HANDLER: CAPTURAR MÉTRICAS DE RESPUESTA ---
+			statusCode := strconv.Itoa(c.Writer.Status()) // Debería ser 400
+			prom.HandlerResquestTotal.WithLabelValues(requestPath, requestMethod, statusCode).Inc()
+			prom.HandlerRequestDuration.WithLabelValues(requestPath, requestMethod, statusCode).Observe(time.Since(start).Seconds())
+			prom.HandlerErrorsTotal.WithLabelValues(requestPath, requestMethod, "schema_validation_failed").Inc() // Contar el error
+			// --- FIN DE CAPTURAR MÉTRICAS DE RESPUESTA ---
+
 			return
 		}
 	}
@@ -145,6 +174,8 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 			Str("async_method", location.Async.Method).
 			Msg("Starting async call")
 		go h.handleAsyncCall(location.Async, c)
+		// Contar las llamadas asíncronas
+		prom.HandlerAsyncCallsTotal.WithLabelValues(requestPath, requestMethod, location.Async.Url).Inc()
 	}
 
 	// Set response status code
@@ -161,6 +192,14 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error processing response template"})
 			// Insertar en BD con el status code real (500)
 			h.insertTransactionToDB(c, location)
+
+			// --- FIN DEL HANDLER: CAPTURAR MÉTRICAS DE RESPUESTA ---
+			statusCode := strconv.Itoa(c.Writer.Status()) // Debería ser 500
+			prom.HandlerResquestTotal.WithLabelValues(requestPath, requestMethod, statusCode).Inc()
+			prom.HandlerRequestDuration.WithLabelValues(requestPath, requestMethod, statusCode).Observe(time.Since(start).Seconds())
+			prom.HandlerErrorsTotal.WithLabelValues(requestPath, requestMethod, "response_template_error").Inc() // Contar el error
+			// --- FIN DE CAPTURAR MÉTRICAS DE RESPUESTA ---
+
 			return
 		}
 
@@ -174,6 +213,13 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 
 	// Insertar en BD al finalizar la operación (casos exitosos)
 	h.insertTransactionToDB(c, location)
+
+	// --- FIN DEL HANDLER: CAPTURAR MÉTRICAS DE RESPUESTA ---
+	// Este es el punto final de ejecución exitosa del handler.
+	statusCode := strconv.Itoa(c.Writer.Status()) // Obtener el status code final.
+	prom.HandlerResquestTotal.WithLabelValues(requestPath, requestMethod, statusCode).Inc()
+	prom.HandlerRequestDuration.WithLabelValues(requestPath, requestMethod, statusCode).Observe(time.Since(start).Seconds())
+	// --- FIN DE CAPTURAR MÉTRICAS DE RESPUESTA ---
 }
 
 // validateRequestBody validates the request body against a JSON schema

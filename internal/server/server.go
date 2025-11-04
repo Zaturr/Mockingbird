@@ -21,6 +21,7 @@ import (
 
 	"catalyst/internal/handler"
 	"catalyst/internal/models"
+	prom "catalyst/prometheus"
 
 	"github.com/gin-gonic/gin"
 	_ "modernc.org/sqlite"
@@ -38,6 +39,7 @@ type Server struct {
 type Manager struct {
 	servers        map[int]*Server
 	apiServer      *Server
+	metricsServer  *Server
 	restartChan    chan string
 	wg             sync.WaitGroup
 	configs        []*models.MockServer
@@ -199,6 +201,46 @@ func (m *Manager) CreateAPIServer(batchManager *database.BatchManager, configDir
 		m.RestartMainServer(serverName)
 		return nil
 	})
+
+	return nil
+}
+
+func (m *Manager) CreateMetricsServer(port int) error {
+	gin.SetMode(gin.ReleaseMode)
+
+	router := gin.New()
+	router.Use(gin.Recovery())
+
+	// Setup metrics endpoint
+	router.GET("/metrics", gin.WrapH(prom.PromHTTPHandler()))
+
+	m.metricsServer = &Server{
+		Port:   port,
+		Router: router,
+	}
+
+	return nil
+}
+
+func (m *Manager) StartMetricsServer() error {
+	if m.metricsServer == nil {
+		return fmt.Errorf("metrics server not created")
+	}
+
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		addr := ":" + strconv.Itoa(m.metricsServer.Port)
+		m.metricsServer.httpServer = &http.Server{
+			Addr:    addr,
+			Handler: m.metricsServer.Router,
+		}
+
+		log.Printf("Starting metrics server on %s", addr)
+		if err := m.metricsServer.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("Error starting metrics server: %v", err)
+		}
+	}()
 
 	return nil
 }
@@ -451,6 +493,10 @@ func (m *Manager) Stop() {
 
 	if m.apiServer != nil {
 		m.apiServer.Stop()
+	}
+
+	if m.metricsServer != nil {
+		m.metricsServer.Stop()
 	}
 
 	for _, server := range m.servers {

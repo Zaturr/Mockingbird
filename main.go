@@ -13,6 +13,7 @@ import (
 	"catalyst/internal/config"
 	"catalyst/internal/models"
 	"catalyst/internal/server"
+	prom "catalyst/prometheus"
 
 	_ "modernc.org/sqlite"
 )
@@ -48,6 +49,7 @@ func main() {
 			log.Fatalf("Error loading configuration files: %v", err)
 		}
 	}
+	prom.InitMetrics()
 
 	// Create server manager
 	manager := server.NewManager()
@@ -93,6 +95,11 @@ func main() {
 		log.Fatalf("Error creating API server: %v", err)
 	}
 
+	// Create metrics server on port 9090 (default Prometheus port)
+	if err := manager.CreateMetricsServer(4894); err != nil {
+		log.Fatalf("Error creating metrics server: %v", err)
+	}
+
 	if err := manager.Start(); err != nil {
 		log.Fatalf("Error starting servers: %v", err)
 	}
@@ -101,8 +108,13 @@ func main() {
 		log.Fatalf("Error starting API server: %v", err)
 	}
 
+	if err := manager.StartMetricsServer(); err != nil {
+		log.Fatalf("Error starting metrics server: %v", err)
+	}
+
 	log.Println("All HTTP servers started successfully")
 	log.Println("API server started on port 8282")
+	log.Println("Metrics server started on port 4894")
 
 	if err := postgresManager.Start(); err != nil {
 		log.Fatalf("Error starting postgres servers: %v", err)
