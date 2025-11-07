@@ -43,10 +43,69 @@ func NewErrorResponse(err error, code int, message ...string) *APIResponse {
 	}
 }
 
-// ConfigUpdateRequest represents a generic configuration update request
+// ServerConfigUpdateRequest represents a generic server configuration update request
+type ServerConfigUpdateRequest struct {
+	ServerName string        `json:"server_name" binding:"required" validate:"min=1,max=100"`
+	Config     *ServerConfig `json:"config" binding:"required"`
+}
+
+// Validate validates the ServerConfigUpdateRequest
+func (r *ServerConfigUpdateRequest) Validate() error {
+
+	if r.Config.Location == nil {
+		return errors.New("location is required")
+	}
+	if r.Config.Listen <= 0 {
+		return errors.New("listen is required and must be greater than 0")
+	}
+	if r.Config.Listen == r.Config.Controlport {
+		return errors.New("listen and controlport cannot be the same")
+	}
+
+	return nil
+}
+
+// Headers represents HTTP headers as a map
+type Headers map[string]string
+
+// ServerLocation represents a server location configuration
+type ServerLocation struct {
+	Path       string   `yaml:"path" json:"path" validate:"required"`
+	Method     string   `yaml:"method" json:"method" validate:"required,oneof=GET POST PUT DELETE PATCH"`
+	Response   string   `yaml:"response" json:"response"`
+	StatusCode int      `yaml:"status_code" json:"status_code" validate:"min=100,max=599"`
+	Headers    *Headers `yaml:"headers" json:"headers"`
+	Schema     string   `yaml:"schema" json:"schema"`
+}
+
+// ServerConfig represents a server configuration
+type ServerConfig struct {
+	Listen      int              `yaml:"listen" json:"listen" validate:"min=1,max=65535"`
+	Controlport int              `yaml:"port" json:"port" validate:"min=1,max=65535"`
+	Logger      bool             `yaml:"logger" json:"logger"`
+	Name        string           `yaml:"name" json:"name" validate:"required"`
+	Version     string           `yaml:"version" json:"version" validate:"required"`
+	Location    []ServerLocation `yaml:"location" json:"location"`
+	LoggerPath  string           `yaml:"logger_path" json:"logger_path"`
+}
+
+// HTTPConfig represents HTTP configuration
+type HTTPConfig struct {
+	Servers []ServerConfig `yaml:"servers" json:"servers" validate:"required,min=1"`
+}
+
+// YamlConfig represents the complete YAML configuration structure
+type YamlConfig struct {
+	HTTP        HTTPConfig `yaml:"http" json:"http" validate:"required"`
+	TestSetting string     `yaml:"test_setting,omitempty" json:"test_setting,omitempty"`
+	RestartTest string     `yaml:"restart_test,omitempty" json:"restart_test,omitempty"`
+	NewField    string     `yaml:"new_field,omitempty" json:"new_field,omitempty"`
+}
+
+// ConfigUpdateRequest represents a configuration update request
 type ConfigUpdateRequest struct {
-	ServerName string                 `json:"server_name" binding:"required" validate:"min=1,max=100"`
-	Config     map[string]interface{} `json:"config" binding:"required"`
+	ServerName string     `json:"server_name" binding:"required" validate:"min=1,max=100"`
+	Config     YamlConfig `json:"config" binding:"required"`
 }
 
 // Validate validates the ConfigUpdateRequest
@@ -57,61 +116,31 @@ func (r *ConfigUpdateRequest) Validate() error {
 	if len(r.ServerName) > 100 {
 		return errors.New("server_name cannot exceed 100 characters")
 	}
-	if r.Config == nil {
-		return errors.New("config is required")
-	}
-	return nil
-}
-
-// ServerLocation represents a server location configuration
-type ServerLocation struct {
-	Path       string            `yaml:"path" json:"path" validate:"required"`
-	Method     string            `yaml:"method" json:"method" validate:"required,oneof=GET POST PUT DELETE PATCH"`
-	Response   string            `yaml:"response" json:"response"`
-	StatusCode int               `yaml:"status_code" json:"status_code" validate:"min=100,max=599"`
-	Headers    map[string]string `yaml:"headers" json:"headers"`
-	Schema     string            `yaml:"schema" json:"schema"`
-}
-
-// ServerConfig represents a server configuration
-type ServerConfig struct {
-	Listen     int              `yaml:"listen" json:"listen" validate:"min=1,max=65535"`
-	Logger     bool             `yaml:"logger" json:"logger"`
-	Name       string           `yaml:"name" json:"name" validate:"required"`
-	Version    string           `yaml:"version" json:"version" validate:"required"`
-	Location   []ServerLocation `yaml:"location" json:"location"`
-	LoggerPath string           `yaml:"logger_path" json:"logger_path"`
-}
-
-// HTTPConfig represents HTTP configuration
-type HTTPConfig struct {
-	Servers []ServerConfig `yaml:"servers" json:"servers" validate:"required,min=1"`
-}
-
-// BancrecerConfig represents the complete Bancrecer configuration structure
-type BancrecerConfig struct {
-	HTTP        HTTPConfig `yaml:"http" json:"http" validate:"required"`
-	TestSetting string     `yaml:"test_setting,omitempty" json:"test_setting,omitempty"`
-	RestartTest string     `yaml:"restart_test,omitempty" json:"restart_test,omitempty"`
-	NewField    string     `yaml:"new_field,omitempty" json:"new_field,omitempty"`
-}
-
-// BancrecerConfigUpdateRequest represents a Bancrecer-specific configuration update request
-type BancrecerConfigUpdateRequest struct {
-	ServerName string          `json:"server_name" binding:"required" validate:"min=1,max=100"`
-	Config     BancrecerConfig `json:"config" binding:"required"`
-}
-
-// Validate validates the BancrecerConfigUpdateRequest
-func (r *BancrecerConfigUpdateRequest) Validate() error {
-	if strings.TrimSpace(r.ServerName) == "" {
-		return errors.New("server_name is required and cannot be empty")
-	}
-	if len(r.ServerName) > 100 {
-		return errors.New("server_name cannot exceed 100 characters")
-	}
 	if len(r.Config.HTTP.Servers) == 0 {
 		return errors.New("at least one server configuration is required")
+	}
+
+	// Valida que no haya puertos duplicados entre servidores
+	portMap := make(map[int]bool)
+	for i, server := range r.Config.HTTP.Servers {
+		// Validar Listen
+		if portMap[server.Listen] {
+			return fmt.Errorf("duplicate listen port %d found in server %d", server.Listen, i)
+		}
+		portMap[server.Listen] = true
+
+		// Validar Controlport
+		if server.Controlport > 0 {
+			if portMap[server.Controlport] {
+				return fmt.Errorf("duplicate controlport %d found in server %d", server.Controlport, i)
+			}
+			portMap[server.Controlport] = true
+		}
+
+		// Validar que Listen y Controlport no sean iguales en el mismo servidor
+		if server.Listen == server.Controlport {
+			return fmt.Errorf("server %d: listen and controlport cannot be the same (%d)", i, server.Listen)
+		}
 	}
 	return nil
 }

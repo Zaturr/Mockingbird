@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -120,22 +121,58 @@ func (h *APIHandler) UpdateConfig(c *gin.Context) {
 		return
 	}
 
-	// Read and parse request body
+	// Read and parse request body to YamlConfig structure
 	body, err := c.GetRawData()
 	if err != nil {
 		c.JSON(http.StatusBadRequest, NewErrorResponse(err, http.StatusBadRequest, "Error reading request body"))
 		return
 	}
 
-	var config map[string]interface{}
-	if err := json.Unmarshal(body, &config); err != nil {
+	var yamlConfig YamlConfig
+	if err := json.Unmarshal(body, &yamlConfig); err != nil {
 		c.JSON(http.StatusBadRequest, NewErrorResponse(err, http.StatusBadRequest, "Invalid JSON format"))
 		return
 	}
 
-	// Update configuration using service
+	// Create ConfigUpdateRequest for validation
+	req := ConfigUpdateRequest{
+		ServerName: serverName,
+		Config:     yamlConfig,
+	}
+
+	// Validate configuration structure
+	if err := req.Validate(); err != nil {
+		log.Printf("ERROR: Validation failed for server %s: %v", serverName, err)
+		c.JSON(http.StatusBadRequest, NewErrorResponse(err, http.StatusBadRequest, "Validation failed"))
+		return
+	}
+
 	configService := NewConfigService(h.configDir)
-	updatedConfig, err := configService.UpdateConfig(serverName, config)
+
+	// Validate port conflicts with other servers BEFORE processing the update
+	if err := configService.ValidatePortConflicts(serverName, yamlConfig); err != nil {
+		log.Printf("ERROR: Port conflict detected for server %s: %v", serverName, err)
+		c.JSON(http.StatusConflict, NewErrorResponse(err, http.StatusConflict, fmt.Sprintf("Port conflict: %s", err.Error())))
+		return
+	}
+
+	// Convert YamlConfig to map[string]interface{} for UpdateConfig method
+	configMap := make(map[string]interface{})
+	configBytes, err := yaml.Marshal(yamlConfig)
+	if err != nil {
+		log.Printf("ERROR: Failed to marshal config for server %s: %v", serverName, err)
+		c.JSON(http.StatusInternalServerError, NewErrorResponse(err, http.StatusInternalServerError, "Error processing configuration"))
+		return
+	}
+
+	if err := yaml.Unmarshal(configBytes, &configMap); err != nil {
+		log.Printf("ERROR: Failed to convert config to map for server %s: %v", serverName, err)
+		c.JSON(http.StatusInternalServerError, NewErrorResponse(err, http.StatusInternalServerError, "Error processing configuration"))
+		return
+	}
+
+	// Update configuration using service
+	updatedConfig, err := configService.UpdateConfig(serverName, configMap)
 	if err != nil {
 		log.Printf("ERROR: Failed to update config for server %s: %v", serverName, err)
 		if err == ErrConfigNotFound {
@@ -264,9 +301,111 @@ func (cs *ConfigService) findConfigFile(serverName string) (string, bool) {
 	return "", false
 }
 
-// UpdateBancrecerConfig handles specific updates for bancrecer.yml structure
-func (h *APIHandler) UpdateBancrecerConfig(c *gin.Context) {
-	var req BancrecerConfigUpdateRequest
+// GetAllUsedPorts retrieves all ports in use by other servers, excluding the specified server
+func (cs *ConfigService) GetAllUsedPorts(excludeServerName string) (map[int]string, error) {
+	portMap := make(map[int]string)
+
+	// Get all YAML files in the directory
+	extensions := []string{".yml", ".yaml"}
+	var files []string
+
+	for _, ext := range extensions {
+		pattern := filepath.Join(cs.configDir, "*"+ext)
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			log.Printf("WARNING: Error finding config files with pattern %s: %v", pattern, err)
+			continue
+		}
+		files = append(files, matches...)
+	}
+
+	// Process each config file
+	for _, file := range files {
+		// Extract server name from filename (without extension)
+		baseName := filepath.Base(file)
+		serverName := strings.TrimSuffix(strings.TrimSuffix(baseName, ".yml"), ".yaml")
+
+		// Skip the server being updated
+		if serverName == excludeServerName {
+			continue
+		}
+
+		// Read and parse config file
+		configData, err := os.ReadFile(file)
+		if err != nil {
+			log.Printf("WARNING: Failed to read config file %s: %v", file, err)
+			continue
+		}
+
+		var config YamlConfig
+		if err := yaml.Unmarshal(configData, &config); err != nil {
+			log.Printf("WARNING: Failed to parse config file %s: %v", file, err)
+			continue
+		}
+
+		// Extract ports from all servers in this config
+		for _, server := range config.HTTP.Servers {
+			if server.Listen > 0 {
+				portMap[server.Listen] = serverName
+			}
+			if server.Controlport > 0 {
+				portMap[server.Controlport] = serverName
+			}
+		}
+	}
+
+	return portMap, nil
+}
+
+// isPortAvailable checks if a port is available on the system
+func isPortAvailable(port int) bool {
+	addr := fmt.Sprintf(":%d", port)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return false
+	}
+	ln.Close()
+	return true
+}
+
+// ValidatePortConflicts validates that ports in the new config don't conflict with other servers
+func (cs *ConfigService) ValidatePortConflicts(serverName string, newConfig YamlConfig) error {
+	usedPorts, err := cs.GetAllUsedPorts(serverName)
+	if err != nil {
+		return fmt.Errorf("failed to check port conflicts: %w", err)
+	}
+
+	// Check each server in the new config
+	for _, server := range newConfig.HTTP.Servers {
+		if usedBy, exists := usedPorts[server.Listen]; exists {
+			return fmt.Errorf("port %d is already in use by server %s", server.Listen, usedBy)
+		}
+
+		// Check Listen port against system (if port is actually in use)
+		if !isPortAvailable(server.Listen) {
+			return fmt.Errorf("port %d is already in use by the system", server.Listen)
+		}
+
+		// Check Controlport if set
+		if server.Controlport > 0 {
+			// Check Controlport against configuration files
+			if usedBy, exists := usedPorts[server.Controlport]; exists {
+				return fmt.Errorf("port %d is already in use by server %s", server.Controlport, usedBy)
+			}
+
+			// Check Controlport against system (if port is actually in use)
+			if !isPortAvailable(server.Controlport) {
+				return fmt.Errorf("port %d is already in use by the system", server.Controlport)
+			}
+		}
+	}
+
+	return nil
+}
+
+// UpdateConfigYaml handles specific updates for YAML configuration structure
+func (h *APIHandler) UpdateConfigYaml(c *gin.Context) {
+	var req ConfigUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, NewErrorResponse(err, http.StatusBadRequest, "Invalid request format"))
 		return
@@ -279,7 +418,14 @@ func (h *APIHandler) UpdateBancrecerConfig(c *gin.Context) {
 
 	configService := NewConfigService(h.configDir)
 
-	// Get current config
+	// Validate port conflicts with other servers BEFORE processing the update
+	if err := configService.ValidatePortConflicts(req.ServerName, req.Config); err != nil {
+		log.Printf("ERROR: Port conflict detected for server %s: %v", req.ServerName, err)
+		c.JSON(http.StatusConflict, NewErrorResponse(err, http.StatusConflict, fmt.Sprintf("Port conflict: %s", err.Error())))
+		return
+	}
+
+	// Get current config (only if port validation passed)
 	currentConfig, err := configService.GetConfig(req.ServerName)
 	if err != nil {
 		log.Printf("ERROR: Failed to get current config for server %s: %v", req.ServerName, err)
@@ -310,7 +456,7 @@ func (h *APIHandler) UpdateBancrecerConfig(c *gin.Context) {
 		return
 	}
 
-	log.Printf("SUCCESS: Updated Bancrecer configuration for server: %s", req.ServerName)
+	log.Printf("SUCCESS: Updated YAML configuration for server: %s", req.ServerName)
 	c.JSON(http.StatusOK, updatedConfig)
 
 	// Notify restart after successful config update

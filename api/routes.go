@@ -115,7 +115,7 @@ func (rg *RouteGroup) SetupConfigRoutes(router *gin.RouterGroup) {
 	{
 		config.GET("", ValidateServerName(), rg.handler.GetConfig)
 		config.PUT("", ValidateServerName(), rg.handler.UpdateConfig)
-		config.PUT("/bancrecer", rg.handler.UpdateBancrecerConfig)
+		config.PUT("/yaml", rg.handler.UpdateConfigYaml)
 	}
 }
 
