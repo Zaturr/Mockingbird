@@ -150,11 +150,11 @@ func (h *APIHandler) UpdateConfig(c *gin.Context) {
 	configService := NewConfigService(h.configDir)
 
 	// Validate port conflicts with other servers BEFORE processing the update
-	if err := configService.ValidatePortConflicts(serverName, yamlConfig); err != nil {
+	/*if err := configService.ValidatePortConflicts(serverName, yamlConfig); err != nil {
 		log.Printf("ERROR: Port conflict detected for server %s: %v", serverName, err)
 		c.JSON(http.StatusConflict, NewErrorResponse(err, http.StatusConflict, fmt.Sprintf("Port conflict: %s", err.Error())))
 		return
-	}
+	}*/
 
 	// Convert YamlConfig to map[string]interface{} for UpdateConfig method
 	configMap := make(map[string]interface{})
@@ -369,39 +369,39 @@ func isPortAvailable(port int) bool {
 }
 
 // ValidatePortConflicts validates that ports in the new config don't conflict with other servers
-func (cs *ConfigService) ValidatePortConflicts(serverName string, newConfig YamlConfig) error {
-	usedPorts, err := cs.GetAllUsedPorts(serverName)
-	if err != nil {
-		return fmt.Errorf("failed to check port conflicts: %w", err)
-	}
+// func (cs *ConfigService) ValidatePortConflicts(serverName string, newConfig YamlConfig) error {
+// 	usedPorts, err := cs.GetAllUsedPorts(serverName)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to check port conflicts: %w", err)
+// 	}
 
-	// Check each server in the new config
-	for _, server := range newConfig.HTTP.Servers {
-		if usedBy, exists := usedPorts[server.Listen]; exists {
-			return fmt.Errorf("port %d is already in use by server %s", server.Listen, usedBy)
-		}
+// 	// Check each server in the new config
+// 	for _, server := range newConfig.HTTP.Servers {
+// 		if usedBy, exists := usedPorts[server.Listen]; exists {
+// 			return fmt.Errorf("port %d is already in use by server %s", server.Listen, usedBy)
+// 		}
 
-		// Check Listen port against system (if port is actually in use)
-		if !isPortAvailable(server.Listen) {
-			return fmt.Errorf("port %d is already in use by the system", server.Listen)
-		}
+// 		// Check Listen port against system (if port is actually in use)
+// 		if !isPortAvailable(server.Listen) {
+// 			return fmt.Errorf("port %d is already in use by the system", server.Listen)
+// 		}
 
-		// Check Controlport if set
-		if server.Controlport > 0 {
-			// Check Controlport against configuration files
-			if usedBy, exists := usedPorts[server.Controlport]; exists {
-				return fmt.Errorf("port %d is already in use by server %s", server.Controlport, usedBy)
-			}
+// 		// Check Controlport if set
+// 		if server.Controlport > 0 {
+// 			// Check Controlport against configuration files
+// 			if usedBy, exists := usedPorts[server.Controlport]; exists {
+// 				return fmt.Errorf("port %d is already in use by server %s", server.Controlport, usedBy)
+// 			}
 
-			// Check Controlport against system (if port is actually in use)
-			if !isPortAvailable(server.Controlport) {
-				return fmt.Errorf("port %d is already in use by the system", server.Controlport)
-			}
-		}
-	}
+// 			// Check Controlport against system (if port is actually in use)
+// 			if !isPortAvailable(server.Controlport) {
+// 				return fmt.Errorf("port %d is already in use by the system", server.Controlport)
+// 			}
+// 		}
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
 // UpdateConfigYaml handles specific updates for YAML configuration structure
 func (h *APIHandler) UpdateConfigYaml(c *gin.Context) {
@@ -419,11 +419,11 @@ func (h *APIHandler) UpdateConfigYaml(c *gin.Context) {
 	configService := NewConfigService(h.configDir)
 
 	// Validate port conflicts with other servers BEFORE processing the update
-	if err := configService.ValidatePortConflicts(req.ServerName, req.Config); err != nil {
+	/*if err := configService.ValidatePortConflicts(req.ServerName, req.Config); err != nil {
 		log.Printf("ERROR: Port conflict detected for server %s: %v", req.ServerName, err)
 		c.JSON(http.StatusConflict, NewErrorResponse(err, http.StatusConflict, fmt.Sprintf("Port conflict: %s", err.Error())))
 		return
-	}
+	}*/
 
 	// Get current config (only if port validation passed)
 	currentConfig, err := configService.GetConfig(req.ServerName)
