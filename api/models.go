@@ -1,8 +1,10 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -68,20 +70,76 @@ func (r *ServerConfigUpdateRequest) Validate() error {
 // Headers represents HTTP headers as a map
 type Headers map[string]string
 
+// ProbabilityString is a custom type that can unmarshal from both number and string
+type ProbabilityString string
+
+// UnmarshalJSON allows ProbabilityString to accept both number and string values
+func (p *ProbabilityString) UnmarshalJSON(data []byte) error {
+	// Try to unmarshal as number first
+	var num float64
+	if err := json.Unmarshal(data, &num); err == nil {
+		*p = ProbabilityString(fmt.Sprintf("%g", num))
+		return nil
+	}
+	// If not a number, try as string
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+	*p = ProbabilityString(str)
+	return nil
+}
+
+// MarshalJSON converts ProbabilityString back to JSON
+func (p ProbabilityString) MarshalJSON() ([]byte, error) {
+	// Try to parse as float to see if it's a number
+	if num, err := strconv.ParseFloat(string(p), 64); err == nil {
+		return json.Marshal(num)
+	}
+	return json.Marshal(string(p))
+}
+
+// ChaosInjection represents chaos injection configuration
+type ChaosInjection struct {
+	Latency Latency `yaml:"latency" json:"latency"`
+	Abort   Abort   `yaml:"abort" json:"abort"`
+	Error   Error   `yaml:"error" json:"error"`
+}
+
+// Latency represents latency configuration for chaos injection
+type Latency struct {
+	Time        int               `yaml:"time" json:"time"`
+	Probability ProbabilityString `yaml:"probability" json:"probability"`
+}
+
+// Abort represents abort configuration for chaos injection
+type Abort struct {
+	Code        int               `yaml:"code" json:"code"`
+	Probability ProbabilityString `yaml:"probability" json:"probability"`
+}
+
+// Error represents error configuration for chaos injection
+type Error struct {
+	Code        int               `yaml:"code" json:"code"`
+	Probability ProbabilityString `yaml:"probability" json:"probability"`
+	Response    string            `yaml:"response" json:"response"`
+}
+
 // ServerLocation represents a server location configuration
 type ServerLocation struct {
-	Path       string   `yaml:"path" json:"path" validate:"required"`
-	Method     string   `yaml:"method" json:"method" validate:"required,oneof=GET POST PUT DELETE PATCH"`
-	Response   string   `yaml:"response" json:"response"`
-	StatusCode int      `yaml:"status_code" json:"status_code" validate:"min=100,max=599"`
-	Headers    *Headers `yaml:"headers" json:"headers"`
-	Schema     string   `yaml:"schema" json:"schema"`
+	Path           string          `yaml:"path" json:"path" validate:"required"`
+	Method         string          `yaml:"method" json:"method" validate:"required,oneof=GET POST PUT DELETE PATCH"`
+	Response       string          `yaml:"response" json:"response"`
+	StatusCode     int             `yaml:"status_code" json:"status_code" validate:"min=100,max=599"`
+	Headers        *Headers        `yaml:"headers" json:"headers"`
+	Schema         string          `yaml:"schema" json:"schema"`
+	ChaosInjection *ChaosInjection `yaml:"chaos_injection" json:"chaos_injection"`
 }
 
 // ServerConfig represents a server configuration
 type ServerConfig struct {
 	Listen      int              `yaml:"listen" json:"listen" validate:"min=1,max=65535"`
-	Controlport int              `yaml:"port" json:"port" validate:"min=1,max=65535"`
+	Controlport int              `yaml:"port" json:"port,omitempty" validate:"min=1,max=65535"`
 	Logger      bool             `yaml:"logger" json:"logger"`
 	Name        string           `yaml:"name" json:"name" validate:"required"`
 	Version     string           `yaml:"version" json:"version" validate:"required"`
@@ -135,11 +193,11 @@ func (r *ConfigUpdateRequest) Validate() error {
 				return fmt.Errorf("duplicate controlport %d found in server %d", server.Controlport, i)
 			}
 			portMap[server.Controlport] = true
-		}
 
-		// Validar que Listen y Controlport no sean iguales en el mismo servidor
-		if server.Listen == server.Controlport {
-			return fmt.Errorf("server %d: listen and controlport cannot be the same (%d)", i, server.Listen)
+			// Validar que Listen y Controlport no sean iguales en el mismo servidor
+			if server.Listen == server.Controlport {
+				return fmt.Errorf("server %d: listen and controlport cannot be the same (%d)", i, server.Listen)
+			}
 		}
 	}
 	return nil
