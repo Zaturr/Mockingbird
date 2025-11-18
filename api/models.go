@@ -101,9 +101,9 @@ func (p ProbabilityString) MarshalJSON() ([]byte, error) {
 
 // ChaosInjection represents chaos injection configuration
 type ChaosInjection struct {
-	Latency Latency `yaml:"latency" json:"latency"`
-	Abort   Abort   `yaml:"abort" json:"abort"`
-	Error   Error   `yaml:"error" json:"error"`
+	Latency *Latency `yaml:"latency,omitempty" json:"latency,omitempty"`
+	Abort   *Abort   `yaml:"abort,omitempty" json:"abort,omitempty"`
+	Error   *Error   `yaml:"error,omitempty" json:"error,omitempty"`
 }
 
 // Latency represents latency configuration for chaos injection

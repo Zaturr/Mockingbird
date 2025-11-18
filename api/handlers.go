@@ -157,15 +157,16 @@ func (h *APIHandler) UpdateConfig(c *gin.Context) {
 	}*/
 
 	// Convert YamlConfig to map[string]interface{} for UpdateConfig method
+	// Use JSON as intermediate format to preserve nil pointers correctly
 	configMap := make(map[string]interface{})
-	configBytes, err := yaml.Marshal(yamlConfig)
+	jsonBytes, err := json.Marshal(yamlConfig)
 	if err != nil {
-		log.Printf("ERROR: Failed to marshal config for server %s: %v", serverName, err)
+		log.Printf("ERROR: Failed to marshal config to JSON for server %s: %v", serverName, err)
 		c.JSON(http.StatusInternalServerError, NewErrorResponse(err, http.StatusInternalServerError, "Error processing configuration"))
 		return
 	}
 
-	if err := yaml.Unmarshal(configBytes, &configMap); err != nil {
+	if err := json.Unmarshal(jsonBytes, &configMap); err != nil {
 		log.Printf("ERROR: Failed to convert config to map for server %s: %v", serverName, err)
 		c.JSON(http.StatusInternalServerError, NewErrorResponse(err, http.StatusInternalServerError, "Error processing configuration"))
 		return
