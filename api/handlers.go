@@ -172,6 +172,9 @@ func (h *APIHandler) UpdateConfig(c *gin.Context) {
 		return
 	}
 
+	// Remove null values from the map before writing to file
+	removeNullValues(configMap)
+
 	// Update configuration using service
 	updatedConfig, err := configService.UpdateConfig(serverName, configMap)
 	if err != nil {
@@ -463,6 +466,51 @@ func (h *APIHandler) UpdateConfigYaml(c *gin.Context) {
 	// Notify restart after successful config update
 	if err := h.notifyRestart(req.ServerName); err != nil {
 		log.Printf("WARNING: Failed to notify restart for server %s: %v", req.ServerName, err)
+	}
+}
+
+// removeNullValues recursively removes null values from a map
+func removeNullValues(m map[string]interface{}) {
+	for key, value := range m {
+		if value == nil {
+			delete(m, key)
+			continue
+		}
+
+		// Handle nested maps
+		if nestedMap, ok := value.(map[string]interface{}); ok {
+			removeNullValues(nestedMap)
+			// If the nested map is now empty, remove it
+			if len(nestedMap) == 0 {
+				delete(m, key)
+			}
+			continue
+		}
+
+		// Handle slices
+		if slice, ok := value.([]interface{}); ok {
+			cleanedSlice := make([]interface{}, 0, len(slice))
+			for _, item := range slice {
+				if item == nil {
+					continue
+				}
+				// Handle maps within slices
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					removeNullValues(itemMap)
+					// Only add non-empty maps
+					if len(itemMap) > 0 {
+						cleanedSlice = append(cleanedSlice, itemMap)
+					}
+				} else {
+					cleanedSlice = append(cleanedSlice, item)
+				}
+			}
+			if len(cleanedSlice) == 0 {
+				delete(m, key)
+			} else {
+				m[key] = cleanedSlice
+			}
+		}
 	}
 }
 

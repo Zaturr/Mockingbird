@@ -116,9 +116,9 @@ func main() {
 	log.Println("API server started on port 8282")
 	log.Println("Metrics server started on port 4894")
 
-	if err := postgresManager.Start(); err != nil {
-		log.Fatalf("Error starting postgres servers: %v", err)
-	}
+	// if err := postgresManager.Start(); err != nil {
+	// 	log.Fatalf("Error starting postgres servers: %v", err)
+	// }
 
 	log.Println("All postgres servers started successfully")
 
@@ -128,6 +128,6 @@ func main() {
 
 	log.Println("Shutting down servers...")
 	manager.Stop()
-	postgresManager.Stop()
+	//postgresManager.Stop()
 	log.Println("Servers stopped")
 }

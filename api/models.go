@@ -70,6 +70,17 @@ func (r *ServerConfigUpdateRequest) Validate() error {
 // Headers represents HTTP headers as a map
 type Headers map[string]string
 
+// Async represents async request configuration
+type Async struct {
+	Url        string   `yaml:"url" json:"url"`
+	Body       string   `yaml:"body" json:"body"`
+	Method     string   `yaml:"method" json:"method"`
+	Headers    *Headers `yaml:"headers" json:"headers"`
+	Timeout    *int     `yaml:"timeout" json:"timeout"`
+	Retries    *int     `yaml:"retries" json:"retries"`
+	RetryDelay *int     `yaml:"retry_delay" json:"retryDelay"`
+}
+
 // ProbabilityString is a custom type that can unmarshal from both number and string
 type ProbabilityString string
 
@@ -133,7 +144,8 @@ type ServerLocation struct {
 	StatusCode     int             `yaml:"status_code" json:"status_code" validate:"min=100,max=599"`
 	Headers        *Headers        `yaml:"headers" json:"headers"`
 	Schema         string          `yaml:"schema" json:"schema"`
-	ChaosInjection *ChaosInjection `yaml:"chaos_injection" json:"chaos_injection"`
+	ChaosInjection *ChaosInjection `yaml:"chaos_injection" json:"chaosInjection"`
+	Async          *Async         `yaml:"async,omitempty" json:"async,omitempty"`
 }
 
 // ServerConfig represents a server configuration
