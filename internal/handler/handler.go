@@ -1,8 +1,12 @@
 package handler
 
+import "C"
+
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"math/rand"
@@ -11,6 +15,7 @@ import (
 	"strings"
 	"text/template"
 	"time"
+	"unsafe"
 
 	"catalyst/database"
 
@@ -21,6 +26,8 @@ import (
 	"github.com/SOLUCIONESSYCOM/scribe"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jbussdieker/golibxml"
+	"github.com/krolaw/xsd"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -28,9 +35,12 @@ import (
 type Handler struct {
 	chaosEngine  *chaos.Engine
 	schemas      map[string]*jsonschema.Schema
+	xsd          map[string]*string
 	Logger       *scribe.Scribe
 	BatchManager *database.BatchManager
 }
+
+var isValidXSD bool
 
 // NewHandler creates a new handler with the given chaos engine
 func NewHandler(logger *scribe.Scribe, batchManager *database.BatchManager) *Handler {
@@ -39,6 +49,7 @@ func NewHandler(logger *scribe.Scribe, batchManager *database.BatchManager) *Han
 		schemas:      make(map[string]*jsonschema.Schema),
 		Logger:       logger,
 		BatchManager: batchManager,
+		xsd:          make(map[string]*string),
 	}
 }
 
@@ -50,8 +61,22 @@ func (h *Handler) RegisterLocation(location models.Location) error {
 		Int("status_code", location.StatusCode).
 		Msg("Registering location")
 
-	// If schema is provided, compile it
 	if location.Schema != "" {
+		var i interface{}
+		if err := xml.Unmarshal([]byte(location.Schema), &i); err != nil {
+			isValidXSD = false
+		} else {
+			isValidXSD = true
+			h.xsd[location.Path+":"+location.Method] = &location.Schema
+			h.Logger.Debug().
+				Str("path", location.Path).
+				Str("method", location.Method).
+				Msg("XML XSD detected for location")
+		}
+	}
+
+	// If schema is provided, compile it
+	if location.Schema != "" && !isValidXSD {
 		schema, err := h.compileSchema(location.Schema)
 		if err != nil {
 			h.Logger.Error().
@@ -141,22 +166,30 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 		}
 	}
 
-	// Validate request body against schema if configured
-	if schema, ok := h.schemas[location.Path+":"+location.Method]; ok {
-		if err := h.validateRequestBody(c, schema); err != nil {
-			h.Logger.ErrorCtx(ctx).AnErr("validation_error", err).Msg("Schema validation failed")
+	if h.xsd[location.Path+":"+location.Method] != nil {
+		if err := validateXSD(c, location, h, ctx); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Schema validation failed: %v", err)})
-			// Insertar en BD con el status code real (400)
-			h.insertTransactionToDB(c, location)
-
-			// --- FIN DEL HANDLER: CAPTURAR MÉTRICAS DE RESPUESTA ---
-			statusCode := strconv.Itoa(c.Writer.Status()) // Debería ser 400
-			prom.HandlerResquestTotal.WithLabelValues(requestPath, requestMethod, statusCode).Inc()
-			prom.HandlerRequestDuration.WithLabelValues(requestPath, requestMethod, statusCode).Observe(time.Since(start).Seconds())
-			prom.HandlerErrorsTotal.WithLabelValues(requestPath, requestMethod, "schema_validation_failed").Inc() // Contar el error
-			// --- FIN DE CAPTURAR MÉTRICAS DE RESPUESTA ---
-
 			return
+		}
+	}
+	// Validate request body against schema if configured
+	if !isValidXSD {
+		if schema, ok := h.schemas[location.Path+":"+location.Method]; ok {
+			if err := h.validateRequestBody(c, schema); err != nil {
+				h.Logger.ErrorCtx(ctx).AnErr("validation_error", err).Msg("Schema validation failed")
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Schema validation failed: %v", err)})
+				// Insertar en BD con el status code real (400)
+				h.insertTransactionToDB(c, location)
+
+				// --- FIN DEL HANDLER: CAPTURAR MÉTRICAS DE RESPUESTA ---
+				statusCode := strconv.Itoa(c.Writer.Status()) // Debería ser 400
+				prom.HandlerResquestTotal.WithLabelValues(requestPath, requestMethod, statusCode).Inc()
+				prom.HandlerRequestDuration.WithLabelValues(requestPath, requestMethod, statusCode).Observe(time.Since(start).Seconds())
+				prom.HandlerErrorsTotal.WithLabelValues(requestPath, requestMethod, "schema_validation_failed").Inc() // Contar el error
+				// --- FIN DE CAPTURAR MÉTRICAS DE RESPUESTA ---
+
+				return
+			}
 		}
 	}
 
@@ -222,6 +255,27 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 	// --- FIN DE CAPTURAR MÉTRICAS DE RESPUESTA ---
 }
 
+func validateXSD(c *gin.Context, location models.Location, h *Handler, ctx context.Context) error {
+	if xmlSchema, err := xsd.ParseSchema([]byte(*h.xsd[location.Path+":"+location.Method])); err != nil {
+		h.Logger.ErrorCtx(ctx).AnErr("error", err).Msg("Error parsing XSD, will try to parse as JSON Schema")
+		isValidXSD = false
+	} else {
+		if xmlSchema != nil {
+			err = h.validateXSD(c, *xmlSchema)
+
+			if err != nil {
+				h.Logger.ErrorCtx(ctx).AnErr("error", err).Msg("Error validating XSD")
+				return err
+			}
+			isValidXSD = true
+		} else {
+			h.Logger.InfoCtx(ctx).Msg("Error compiling schema")
+			return err
+		}
+	}
+	return nil
+}
+
 // validateRequestBody validates the request body against a JSON schema
 func (h *Handler) validateRequestBody(c *gin.Context, schema *jsonschema.Schema) error {
 	ctx := c.Request.Context()
@@ -240,6 +294,7 @@ func (h *Handler) validateRequestBody(c *gin.Context, schema *jsonschema.Schema)
 
 	// Parse the JSON
 	var data interface{}
+
 	if err := json.Unmarshal(body, &data); err != nil {
 		h.Logger.ErrorCtx(ctx).AnErr("error", err).Msg("Error parsing JSON")
 		return fmt.Errorf("error parsing JSON: %w", err)
@@ -417,6 +472,31 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 	}
 
 	return buf.String(), nil
+}
+
+func (h *Handler) validateXSD(c *gin.Context, schema xsd.Schema) error {
+	body := c.Request.Body
+
+	bodyBytes, err := io.ReadAll(body)
+
+	if err != nil {
+		return fmt.Errorf("error reading request body: %w", err)
+	}
+
+	doc := golibxml.ParseDoc(string(bodyBytes))
+
+	if doc == nil {
+		return fmt.Errorf("error parsing request body")
+	}
+
+	defer doc.Free()
+	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	if err := schema.Validate(xsd.DocPtr(unsafe.Pointer(doc.Ptr))); err != nil {
+		return fmt.Errorf("error validating schema: %w", err)
+	}
+
+	return nil
 }
 
 // insertTransactionToDB inserta la transacción en la base de datos
