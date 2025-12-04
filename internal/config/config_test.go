@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"mockingbird/internal/models"
+	"catalyst/internal/models"
 )
 
 func TestLoadConfig(t *testing.T) {

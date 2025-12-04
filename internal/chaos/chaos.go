@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"mockingbird/internal/models"
+	"catalyst/internal/models"
 )
 
 // Engine manages chaos injection in HTTP responses
@@ -44,6 +44,10 @@ func (e *Engine) ApplyChaos(w http.ResponseWriter, chaosConfig *models.ChaosInje
 	errorCode := e.applyError(chaosConfig.Error)
 	if errorCode > 0 {
 		w.WriteHeader(errorCode)
+		_, err := w.Write([]byte(chaosConfig.Error.Response))
+		if err != nil {
+			return false
+		}
 		return true
 	}
 

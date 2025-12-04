@@ -1,159 +1,127 @@
+
 http:
   servers:
-    - listen: 8080
-      logger: true
-      location:
-        - path: /api/hello
-          method: GET
-          response: '{"message": "Hello, World!"}'
-          status_code: 200
-          headers:
-            Content-Type: application/json
-        - path: /api/echo
-          method: POST
-          schema: |
-            {
-              "type": "object",
-              "properties": {
-                "message": { "type": "string" }
-              },
-              "required": ["message"]
-            }
-          response: '{"echo": "{{.message}}"}'
-          status_code: 200
-          headers:
-            Content-Type: application/json
-    - listen: 8081
-      logger: false
-      chaos_injection:
-        latency:
-          time: 100
-          probability: "50"
-        abort:
-          code: 500
-          probability: "10"
-        error:
-          code: 400
-          probability: "5"
-      location:
-        - path: /api/data
-          method: GET
-          response: '{"data": [1, 2, 3, 4, 5]}'
-          status_code: 200
-          headers:
-            Content-Type: application/json
-        - path: /api/async
-          method: POST
-          response: '{"status": "processing"}'
-          status_code: 202
-          async:
-            url: http://localhost:8080/api/callback
-            method: POST
-            body: '{"result": "success"}'
-            timeout: 5000
-            retries: 3
-            retry_delay: 1000
-            headers:
+        - listen: 8101
+          logger: true
+          name: "MAIN"
+          logger_path: "./log/main"
+          version: "0.0.1"
+          location:
+            - path: /
+              method: GET
+              schema: '{}'
+              static_dir: "samplesite"
+              response: '{"message": "Hello, World!"}'
+              status_code: 200
               Content-Type: application/json
+          chaos_injection:
+              probability: 50
+              status_code: 500
+        - listen: 3005
+          logger: true
+          name: "GRAFANA"
+          logger_path: "./log/grafana"
+          version: "0.0.1"
+          location:
+            - path: /grafana
+              method: GET
+              response: '{"message": "Hello, World!"}'
+              status_code: 200
+              headers:
+                Content-Type: application/json
+        - listen: 5090
+          logger: true
+          name: "VISOR"
+          logger_path: "./log/visor"
+          version: "0.0.1"
+          location:
+            - path: /
+              method: GET
+              response: '{"message": "Hello, World!"}'
+              status_code: 200
+              headers:
+                Content-Type: application/json
+                chaos_injection: 'chaos1'
+        - listen: 5091
+          logger: true
+          name: "VISOR_API"
+          logger_path: "./log/visor_api"
+          version: "0.0.1"
+          location:
+            - path: /
+              method: GET
+              response: '{"message": "Hello, World!"}'
+              status_code: 200
+              headers:
+                Content-Type: application/json
+          chaos_injection:
+            probability: 100
+            status_code: 500
+        - listen: 8102
+          logger: true
+          name: "SYCOM"
+          logger_path: "./log/sycom"
+          version: "0.0.1"
+          location:
+            - path: /sycom
+              method: GET
+              response: '{"message": "Hello, World!"}'
+              status_code: 200
+              headers:
+                Content-Type: application/json
+        - listen: 8085
+          logger: true
+          name: "AUTH"
+          logger_path: "./log/auth"
+          version: "0.0.1"
+          location:
+            - path: /
+              method: GET
+              response: '{"message": "Hello, World!"}'
+              status_code: 200
+              headers:
+                Content-Type: application/json
+        - listen: 8082
+          logger: true
+          name: "ANOTHERAPI"
+          logger_path: "./log/auth"
+          version: "0.0.1"
+          location:
+            - path: /
+              method: GET
+              response: '{"message": "Hello, World!"}'
+              status_code: 200
+              headers:
+                Content-Type: application/json
+        - listen: 3500
+          logger: true
+          name: "CHECKOUT"
+          logger_path: "./log/checkout"
+          version: "0.0.1"
+          location:
+            - path: /
+              method: GET
+              response: '{"message": "Hello, World!"}'
+              status_code: 200
+              headers:
+                Content-Type: application/json
+postgres:
+    servers:
+      - name: 'pgA'
+        user: 'user'
+        password: 'password'
+        database: 'postgres'
+        host: '127.0.0.1'
+        port: 5432
+        logger: true
+        log_path: './logs/DBA'
+        init_script: './init.sql' #optional
+        seed:
+          - table: 'credito_inmediato_enviado'
+            schema: 'simf'
+            rows: 100
+            overrides: #optional. if present it intercepts the column if found and injects the data, otherwise it will fake the data.
+              - column: 'st_respst_negoci'
+                value: 'A'
 
 
-
-
-        - path: /api/users
-          method: POST
-          schema: |
-            {
-              "type": "object",
-              "properties": {
-                "user": {
-                  "type": "object",
-                  "properties": {
-                    "id": { 
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "name": { 
-                      "type": "string",
-                      "minLength": 2,
-                      "maxLength": 50
-                    },
-                    "email": { 
-                      "type": "string",
-                      "format": "email"
-                    },
-                    "age": {
-                      "type": "integer",
-                      "minimum": 18,
-                      "maximum": 120
-                    },
-                    "roles": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "enum": ["admin", "user", "editor", "viewer"]
-                      },
-                      "minItems": 1
-                    },
-                    "preferences": {
-                      "type": "object",
-                      "properties": {
-                        "notifications": { "type": "boolean" },
-                        "theme": { 
-                          "type": "string",
-                          "enum": ["light", "dark", "system"]
-                        },
-                        "language": { 
-                          "type": "string",
-                          "pattern": "^[a-z]{2}(-[A-Z]{2})?$"
-                        }
-                      }
-                    },
-                    "address": {
-                      "type": "object",
-                      "properties": {
-                        "street": { "type": "string" },
-                        "city": { "type": "string" },
-                        "zipcode": { 
-                          "type": "string",
-                          "pattern": "^\\d{5}(-\\d{4})?$"
-                        },
-                        "country": { "type": "string" }
-                      },
-                      "required": ["street", "city", "country"]
-                    }
-                  },
-                  "required": ["id", "name", "email", "roles"]
-                },
-                "metadata": {
-                  "type": "object",
-                  "properties": {
-                    "source": { "type": "string" },
-                    "timestamp": { 
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  }
-                }
-              },
-              "required": ["user"]
-            }
-          response: |
-            {
-              "status": "success",
-              "message": "User {{.user.name}} created successfully",
-              "userId": {{.user.id}},
-              "userDetails": {
-                "name": "{{.user.name}}",
-                "email": "{{.user.email}}",
-                "age": {{.user.age}},
-                "roles": {{toJson .user.roles}},
-                "preferences": {{toJson .user.preferences}},
-                "address": {{toJson .user.address}}
-              },
-              "createdAt": "{{now}}",
-              "metadata": {{toJson .metadata}}
-            }
-          status_code: 201
-          headers:
-            Content-Type: application/json
-            X-Custom-Header: user-created

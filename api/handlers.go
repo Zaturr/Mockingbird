@@ -1,0 +1,527 @@
+package api
+
+import (
+	"catalyst/database"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"gopkg.in/yaml.v3"
+)
+
+// APIHandler handles REST API endpoints with improved structure and error handling
+type APIHandler struct {
+	batchManager *database.BatchManager
+	configDir    string
+	restartChan  chan string
+	timeout      time.Duration
+}
+
+// ConfigService handles configuration operations
+type ConfigService struct {
+	configDir string
+	timeout   time.Duration
+}
+
+// DatabaseService handles database operations
+type DatabaseService struct {
+	batchManager *database.BatchManager
+	timeout      time.Duration
+}
+
+// NewAPIHandler creates a new APIHandler instance
+func NewAPIHandler(batchManager *database.BatchManager, configDir string, restartChan chan string) *APIHandler {
+	return &APIHandler{
+		batchManager: batchManager,
+		configDir:    configDir,
+		restartChan:  restartChan,
+		timeout:      30 * time.Second,
+	}
+}
+
+// NewConfigService creates a new ConfigService instance
+func NewConfigService(configDir string) *ConfigService {
+	return &ConfigService{
+		configDir: configDir,
+		timeout:   30 * time.Second,
+	}
+}
+
+// NewDatabaseService creates a new DatabaseService instance
+func NewDatabaseService(batchManager *database.BatchManager) *DatabaseService {
+	return &DatabaseService{
+		batchManager: batchManager,
+		timeout:      30 * time.Second,
+	}
+}
+
+// GetData handles GET /api/mock/data - retrieves all records from database
+func (h *APIHandler) GetData(c *gin.Context) {
+	log.Printf("GET /api/mock/data - Retrieving all records from database")
+
+	if h.batchManager == nil {
+		log.Printf("ERROR: Database not available for GET /api/mock/data")
+		c.JSON(http.StatusInternalServerError, NewErrorResponse(ErrConfigNotFound, http.StatusInternalServerError, "Database not available"))
+		return
+	}
+
+	dbService := NewDatabaseService(h.batchManager)
+	records, err := dbService.GetAllRecords()
+	if err != nil {
+		log.Printf("ERROR: Failed to retrieve data from database: %v", err)
+		c.JSON(http.StatusInternalServerError, NewErrorResponse(err, http.StatusInternalServerError, "Error retrieving data"))
+		return
+	}
+
+	var apiRecords []map[string]interface{}
+	for _, record := range records {
+		apiRecords = append(apiRecords, record.ToAPIFormat())
+	}
+
+	log.Printf("SUCCESS: Retrieved %d records from database", len(apiRecords))
+	c.JSON(http.StatusOK, apiRecords)
+}
+
+// GetConfig handles GET /api/mock/config - retrieves configuration with real structure
+func (h *APIHandler) GetConfig(c *gin.Context) {
+	serverName := strings.TrimSpace(c.Query("server_name"))
+	if serverName == "" {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(ErrInvalidServer, http.StatusBadRequest, "server_name parameter is required"))
+		return
+	}
+
+	configService := NewConfigService(h.configDir)
+	config, err := configService.GetConfig(serverName)
+	if err != nil {
+		log.Printf("ERROR: Failed to get config for server %s: %v", serverName, err)
+		if err == ErrConfigNotFound {
+			c.JSON(http.StatusNotFound, NewErrorResponse(err, http.StatusNotFound, fmt.Sprintf("Configuration file not found: %s", serverName)))
+		} else {
+			c.JSON(http.StatusInternalServerError, NewErrorResponse(err, http.StatusInternalServerError, "Error retrieving configuration"))
+		}
+		return
+	}
+
+	log.Printf("SUCCESS: Retrieved configuration for server: %s", serverName)
+	c.JSON(http.StatusOK, config)
+}
+
+// UpdateConfig handles PUT /api/mock/config - updates configuration
+func (h *APIHandler) UpdateConfig(c *gin.Context) {
+	serverName := strings.TrimSpace(c.Query("server_name"))
+	if serverName == "" {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(ErrInvalidServer, http.StatusBadRequest, "server_name parameter is required"))
+		return
+	}
+
+	// Read and parse request body to YamlConfig structure
+	body, err := c.GetRawData()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(err, http.StatusBadRequest, "Error reading request body"))
+		return
+	}
+
+	var yamlConfig YamlConfig
+	if err := json.Unmarshal(body, &yamlConfig); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(err, http.StatusBadRequest, "Invalid JSON format"))
+		return
+	}
+
+	// Create ConfigUpdateRequest for validation
+	req := ConfigUpdateRequest{
+		ServerName: serverName,
+		Config:     yamlConfig,
+	}
+
+	// Validate configuration structure
+	if err := req.Validate(); err != nil {
+		log.Printf("ERROR: Validation failed for server %s: %v", serverName, err)
+		c.JSON(http.StatusBadRequest, NewErrorResponse(err, http.StatusBadRequest, "Validation failed"))
+		return
+	}
+
+	configService := NewConfigService(h.configDir)
+
+	// Validate port conflicts with other servers BEFORE processing the update
+	/*if err := configService.ValidatePortConflicts(serverName, yamlConfig); err != nil {
+		log.Printf("ERROR: Port conflict detected for server %s: %v", serverName, err)
+		c.JSON(http.StatusConflict, NewErrorResponse(err, http.StatusConflict, fmt.Sprintf("Port conflict: %s", err.Error())))
+		return
+	}*/
+
+	// Convert YamlConfig to map[string]interface{} for UpdateConfig method
+	// Use JSON as intermediate format to preserve nil pointers correctly
+	configMap := make(map[string]interface{})
+	jsonBytes, err := json.Marshal(yamlConfig)
+	if err != nil {
+		log.Printf("ERROR: Failed to marshal config to JSON for server %s: %v", serverName, err)
+		c.JSON(http.StatusInternalServerError, NewErrorResponse(err, http.StatusInternalServerError, "Error processing configuration"))
+		return
+	}
+
+	if err := json.Unmarshal(jsonBytes, &configMap); err != nil {
+		log.Printf("ERROR: Failed to convert config to map for server %s: %v", serverName, err)
+		c.JSON(http.StatusInternalServerError, NewErrorResponse(err, http.StatusInternalServerError, "Error processing configuration"))
+		return
+	}
+
+	// Remove null values from the map before writing to file
+	removeNullValues(configMap)
+
+	// Update configuration using service
+	updatedConfig, err := configService.UpdateConfig(serverName, configMap)
+	if err != nil {
+		log.Printf("ERROR: Failed to update config for server %s: %v", serverName, err)
+		if err == ErrConfigNotFound {
+			c.JSON(http.StatusNotFound, NewErrorResponse(err, http.StatusNotFound, fmt.Sprintf("Configuration file not found: %s", serverName)))
+		} else {
+			c.JSON(http.StatusInternalServerError, NewErrorResponse(err, http.StatusInternalServerError, "Error updating configuration"))
+		}
+		return
+	}
+
+	log.Printf("SUCCESS: Updated configuration for server: %s", serverName)
+	c.JSON(http.StatusOK, updatedConfig)
+
+	// Notify restart after successful config update
+	if err := h.notifyRestart(serverName); err != nil {
+		log.Printf("WARNING: Failed to notify restart for server %s: %v", serverName, err)
+	}
+}
+
+// GetAllRecords retrieves all records from the database
+func (ds *DatabaseService) GetAllRecords() ([]DatabaseRecord, error) {
+	if ds.batchManager == nil || ds.batchManager.DB == nil {
+		return nil, fmt.Errorf("database not available")
+	}
+
+	db := ds.batchManager.DB
+	query := `SELECT uuid, recepcion_id, sender_id, request_headers, request_method, 
+			  request_endpoint, request_body, response_headers, response_body, 
+			  response_status_code, timestamp FROM mock_transactions ORDER BY timestamp DESC`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query database: %w", err)
+	}
+	defer rows.Close()
+
+	var records []DatabaseRecord
+	for rows.Next() {
+		var record DatabaseRecord
+		var requestHeaders, responseHeaders string
+
+		err := rows.Scan(
+			&record.UUID,
+			&record.RecepcionID,
+			&record.SenderID,
+			&requestHeaders,
+			&record.RequestMethod,
+			&record.RequestEndpoint,
+			&record.RequestBody,
+			&responseHeaders,
+			&record.ResponseBody,
+			&record.ResponseStatusCode,
+			&record.Timestamp,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan database row: %w", err)
+		}
+		records = append(records, record)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	return records, nil
+}
+
+// GetConfig retrieves configuration for a specific server
+func (cs *ConfigService) GetConfig(serverName string) (map[string]interface{}, error) {
+	if strings.TrimSpace(serverName) == "" {
+		return nil, ErrInvalidServer
+	}
+
+	configFile, found := cs.findConfigFile(serverName)
+	if !found {
+		return nil, ErrConfigNotFound
+	}
+
+	configData, err := os.ReadFile(configFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	var config map[string]interface{}
+	if err := yaml.Unmarshal(configData, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	return config, nil
+}
+
+// UpdateConfig updates configuration for a specific server
+func (cs *ConfigService) UpdateConfig(serverName string, config map[string]interface{}) (map[string]interface{}, error) {
+	if strings.TrimSpace(serverName) == "" {
+		return nil, ErrInvalidServer
+	}
+
+	configFile, found := cs.findConfigFile(serverName)
+	if !found {
+		return nil, ErrConfigNotFound
+	}
+
+	// Convert config to YAML
+	updatedConfig, err := yaml.Marshal(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	// Write updated configuration
+	if err := os.WriteFile(configFile, updatedConfig, 0644); err != nil {
+		return nil, fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return config, nil
+}
+
+// findConfigFile finds the configuration file for a server, trying different extensions
+func (cs *ConfigService) findConfigFile(serverName string) (string, bool) {
+	extensions := []string{".yml", ".yaml"}
+	for _, ext := range extensions {
+		configFile := filepath.Join(cs.configDir, serverName+ext)
+		if _, err := os.Stat(configFile); err == nil {
+			return configFile, true
+		}
+	}
+	return "", false
+}
+
+// GetAllUsedPorts retrieves all ports in use by other servers, excluding the specified server
+func (cs *ConfigService) GetAllUsedPorts(excludeServerName string) (map[int]string, error) {
+	portMap := make(map[int]string)
+
+	// Get all YAML files in the directory
+	extensions := []string{".yml", ".yaml"}
+	var files []string
+
+	for _, ext := range extensions {
+		pattern := filepath.Join(cs.configDir, "*"+ext)
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			log.Printf("WARNING: Error finding config files with pattern %s: %v", pattern, err)
+			continue
+		}
+		files = append(files, matches...)
+	}
+
+	// Process each config file
+	for _, file := range files {
+		// Extract server name from filename (without extension)
+		baseName := filepath.Base(file)
+		serverName := strings.TrimSuffix(strings.TrimSuffix(baseName, ".yml"), ".yaml")
+
+		// Skip the server being updated
+		if serverName == excludeServerName {
+			continue
+		}
+
+		// Read and parse config file
+		configData, err := os.ReadFile(file)
+		if err != nil {
+			log.Printf("WARNING: Failed to read config file %s: %v", file, err)
+			continue
+		}
+
+		var config YamlConfig
+		if err := yaml.Unmarshal(configData, &config); err != nil {
+			log.Printf("WARNING: Failed to parse config file %s: %v", file, err)
+			continue
+		}
+
+		// Extract ports from all servers in this config
+		for _, server := range config.HTTP.Servers {
+			if server.Listen > 0 {
+				portMap[server.Listen] = serverName
+			}
+			if server.Controlport > 0 {
+				portMap[server.Controlport] = serverName
+			}
+		}
+	}
+
+	return portMap, nil
+}
+
+// isPortAvailable checks if a port is available on the system
+func isPortAvailable(port int) bool {
+	addr := fmt.Sprintf(":%d", port)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return false
+	}
+	ln.Close()
+	return true
+}
+
+// ValidatePortConflicts validates that ports in the new config don't conflict with other servers
+// func (cs *ConfigService) ValidatePortConflicts(serverName string, newConfig YamlConfig) error {
+// 	usedPorts, err := cs.GetAllUsedPorts(serverName)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to check port conflicts: %w", err)
+// 	}
+
+// 	// Check each server in the new config
+// 	for _, server := range newConfig.HTTP.Servers {
+// 		if usedBy, exists := usedPorts[server.Listen]; exists {
+// 			return fmt.Errorf("port %d is already in use by server %s", server.Listen, usedBy)
+// 		}
+
+// 		// Check Listen port against system (if port is actually in use)
+// 		if !isPortAvailable(server.Listen) {
+// 			return fmt.Errorf("port %d is already in use by the system", server.Listen)
+// 		}
+
+// 		// Check Controlport if set
+// 		if server.Controlport > 0 {
+// 			// Check Controlport against configuration files
+// 			if usedBy, exists := usedPorts[server.Controlport]; exists {
+// 				return fmt.Errorf("port %d is already in use by server %s", server.Controlport, usedBy)
+// 			}
+
+// 			// Check Controlport against system (if port is actually in use)
+// 			if !isPortAvailable(server.Controlport) {
+// 				return fmt.Errorf("port %d is already in use by the system", server.Controlport)
+// 			}
+// 		}
+// 	}
+
+// 	return nil
+// }
+
+// UpdateConfigYaml handles specific updates for YAML configuration structure
+func (h *APIHandler) UpdateConfigYaml(c *gin.Context) {
+	var req ConfigUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(err, http.StatusBadRequest, "Invalid request format"))
+		return
+	}
+
+	if err := req.Validate(); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(err, http.StatusBadRequest, "Validation failed"))
+		return
+	}
+
+	configService := NewConfigService(h.configDir)
+
+	// Validate port conflicts with other servers BEFORE processing the update
+	/*if err := configService.ValidatePortConflicts(req.ServerName, req.Config); err != nil {
+		log.Printf("ERROR: Port conflict detected for server %s: %v", req.ServerName, err)
+		c.JSON(http.StatusConflict, NewErrorResponse(err, http.StatusConflict, fmt.Sprintf("Port conflict: %s", err.Error())))
+		return
+	}*/
+
+	// Get current config (only if port validation passed)
+	currentConfig, err := configService.GetConfig(req.ServerName)
+	if err != nil {
+		log.Printf("ERROR: Failed to get current config for server %s: %v", req.ServerName, err)
+		if err == ErrConfigNotFound {
+			c.JSON(http.StatusNotFound, NewErrorResponse(err, http.StatusNotFound, fmt.Sprintf("Configuration file not found: %s", req.ServerName)))
+		} else {
+			c.JSON(http.StatusInternalServerError, NewErrorResponse(err, http.StatusInternalServerError, "Error retrieving current configuration"))
+		}
+		return
+	}
+
+	// Update configuration with new values
+	if req.Config.TestSetting != "" {
+		currentConfig["test_setting"] = req.Config.TestSetting
+	}
+	if req.Config.RestartTest != "" {
+		currentConfig["restart_test"] = req.Config.RestartTest
+	}
+	if req.Config.NewField != "" {
+		currentConfig["new_field"] = req.Config.NewField
+	}
+
+	// Update the configuration
+	updatedConfig, err := configService.UpdateConfig(req.ServerName, currentConfig)
+	if err != nil {
+		log.Printf("ERROR: Failed to update config for server %s: %v", req.ServerName, err)
+		c.JSON(http.StatusInternalServerError, NewErrorResponse(err, http.StatusInternalServerError, "Error updating configuration"))
+		return
+	}
+
+	log.Printf("SUCCESS: Updated YAML configuration for server: %s", req.ServerName)
+	c.JSON(http.StatusOK, updatedConfig)
+
+	// Notify restart after successful config update
+	if err := h.notifyRestart(req.ServerName); err != nil {
+		log.Printf("WARNING: Failed to notify restart for server %s: %v", req.ServerName, err)
+	}
+}
+
+// removeNullValues recursively removes null values from a map
+func removeNullValues(m map[string]interface{}) {
+	for key, value := range m {
+		if value == nil {
+			delete(m, key)
+			continue
+		}
+
+		// Handle nested maps
+		if nestedMap, ok := value.(map[string]interface{}); ok {
+			removeNullValues(nestedMap)
+			// If the nested map is now empty, remove it
+			if len(nestedMap) == 0 {
+				delete(m, key)
+			}
+			continue
+		}
+
+		// Handle slices
+		if slice, ok := value.([]interface{}); ok {
+			cleanedSlice := make([]interface{}, 0, len(slice))
+			for _, item := range slice {
+				if item == nil {
+					continue
+				}
+				// Handle maps within slices
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					removeNullValues(itemMap)
+					// Only add non-empty maps
+					if len(itemMap) > 0 {
+						cleanedSlice = append(cleanedSlice, itemMap)
+					}
+				} else {
+					cleanedSlice = append(cleanedSlice, item)
+				}
+			}
+			if len(cleanedSlice) == 0 {
+				delete(m, key)
+			} else {
+				m[key] = cleanedSlice
+			}
+		}
+	}
+}
+
+// notifyRestart sends a restart signal for the specified server
+func (h *APIHandler) notifyRestart(serverName string) error {
+	select {
+	case h.restartChan <- serverName:
+		log.Printf("Restart signal sent for server: %s", serverName)
+		return nil
+	default:
+		log.Printf("Restart channel full, dropping signal for server: %s", serverName)
+		return ErrChannelFull
+	}
+}

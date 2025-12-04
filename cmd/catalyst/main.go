@@ -1,15 +1,16 @@
 package main
 
 import (
+	postgres_server "catalyst/internal/postgres"
 	"flag"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"mockingbird/internal/config"
-	"mockingbird/internal/models"
-	"mockingbird/internal/server"
+	"catalyst/internal/config"
+	"catalyst/internal/models"
+	"catalyst/internal/server"
 )
 
 func main() {
@@ -46,11 +47,14 @@ func main() {
 
 	// Create server manager
 	manager := server.NewManager()
-
+	postgresManager := postgres_server.NewPostgresManager()
 	// Create servers from configurations
 	for _, cfg := range configs {
 		if err := manager.CreateServers(cfg); err != nil {
-			log.Fatalf("Error creating servers: %v", err)
+			log.Fatalf("Error creating http servers: %v", err)
+		}
+		if err := postgresManager.CreateServers(cfg); err != nil {
+			log.Fatalf("Error creating postgres servers: %v", err)
 		}
 	}
 
@@ -59,7 +63,13 @@ func main() {
 		log.Fatalf("Error starting servers: %v", err)
 	}
 
-	log.Println("All servers started successfully")
+	log.Println("All HTTP servers started successfully")
+
+	if err := postgresManager.Start(); err != nil {
+		log.Fatalf("Error starting postgres servers: %v", err)
+	}
+
+	log.Println("All postgres servers started successfully")
 
 	// Wait for interrupt signal to gracefully shut down the servers
 	quit := make(chan os.Signal, 1)
@@ -68,5 +78,6 @@ func main() {
 
 	log.Println("Shutting down servers...")
 	manager.Stop()
+	postgresManager.Stop()
 	log.Println("Servers stopped")
 }

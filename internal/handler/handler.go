@@ -1,52 +1,85 @@
 package handler
 
+import "C"
+
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
+	"unsafe"
 
-	"mockingbird/internal/chaos"
-	"mockingbird/internal/models"
+	"catalyst/database"
 
-	"github.com/Orlandoiii/logger"
+	"catalyst/internal/chaos"
+	"catalyst/internal/models"
+	prom "catalyst/prometheus"
+
 	"github.com/SOLUCIONESSYCOM/scribe"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jbussdieker/golibxml"
+	"github.com/krolaw/xsd"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // Handler manages HTTP request handling based on configuration
 type Handler struct {
-	chaosEngine *chaos.Engine
-	schemas     map[string]*jsonschema.Schema
+	chaosEngine  *chaos.Engine
+	schemas      map[string]*jsonschema.Schema
+	xsd          map[string]*string
+	Logger       *scribe.Scribe
+	BatchManager *database.BatchManager
 }
 
+var isValidXSD bool
+
 // NewHandler creates a new handler with the given chaos engine
-func NewHandler() *Handler {
+func NewHandler(logger *scribe.Scribe, batchManager *database.BatchManager) *Handler {
 	return &Handler{
-		chaosEngine: chaos.NewEngine(),
-		schemas:     make(map[string]*jsonschema.Schema),
+		chaosEngine:  chaos.NewEngine(),
+		schemas:      make(map[string]*jsonschema.Schema),
+		Logger:       logger,
+		BatchManager: batchManager,
+		xsd:          make(map[string]*string),
 	}
 }
 
 // RegisterLocation registers a location with the handler
 func (h *Handler) RegisterLocation(location models.Location) error {
-	logger.Info().
+	h.Logger.Info().
 		Str("path", location.Path).
 		Str("method", location.Method).
 		Int("status_code", location.StatusCode).
 		Msg("Registering location")
 
-	// If schema is provided, compile it
 	if location.Schema != "" {
+		var i interface{}
+		if err := xml.Unmarshal([]byte(location.Schema), &i); err != nil {
+			isValidXSD = false
+		} else {
+			isValidXSD = true
+			h.xsd[location.Path+":"+location.Method] = &location.Schema
+			h.Logger.Debug().
+				Str("path", location.Path).
+				Str("method", location.Method).
+				Msg("XML XSD detected for location")
+		}
+	}
+
+	// If schema is provided, compile it
+	if location.Schema != "" && !isValidXSD {
 		schema, err := h.compileSchema(location.Schema)
 		if err != nil {
-			logger.Error().
+			h.Logger.Error().
 				Str("path", location.Path).
 				Str("method", location.Method).
 				AnErr("error", err).
@@ -54,7 +87,7 @@ func (h *Handler) RegisterLocation(location models.Location) error {
 			return fmt.Errorf("error compiling schema for path %s: %w", location.Path, err)
 		}
 		h.schemas[location.Path+":"+location.Method] = schema
-		logger.Debug().
+		h.Logger.Debug().
 			Str("path", location.Path).
 			Str("method", location.Method).
 			Msg("Schema compiled successfully for location")
@@ -89,13 +122,27 @@ func (h *Handler) compileSchema(schemaStr string) (*jsonschema.Schema, error) {
 
 // HandleRequest handles an HTTP request based on the location configuration
 func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
-	ctx := c.Request.Context()
-	lc := scribe.GetLogContext(ctx)
-	lc.Set("request_id", uuid.New().String())
-	lc.Set("location_path", location.Path)
-	lc.Set("location_method", location.Method)
+	// Start timing for metrics
+	start := time.Now()
+	requestPath := location.Path // Usar location.Path para las métricas si es consistente
+	requestMethod := c.Request.Method
 
-	scribe.DebugWithCtx(ctx).
+	// Incrementar el gauge de solicitudes activas para este path/method
+	prom.HandlerActiveRequests.WithLabelValues(requestMethod, requestPath).Inc()
+
+	// Asegurarse de que el gauge se decremente al finalizar, sin importar el resultado
+	defer prom.HandlerActiveRequests.WithLabelValues(requestMethod, requestPath).Dec()
+
+	ctx := scribe.WithCtx(c.Request.Context())
+
+	logCtx := scribe.GetLogContext(ctx)
+
+	logCtx.Set("request_trace_id", uuid.New().String())
+	r := c.Request.WithContext(ctx)
+
+	c.Request = r
+
+	h.Logger.DebugCtx(ctx).
 		Str("method", c.Request.Method).
 		Str("path", c.Request.URL.Path).
 		Str("ip", c.ClientIP()).
@@ -104,17 +151,45 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 	// Apply chaos injection if configured
 	if location.ChaosInjection != nil {
 		if h.chaosEngine.ApplyChaos(c.Writer, location.ChaosInjection) {
-			scribe.WarnWithCtx(ctx).Msg("Request aborted by chaos injection")
-			return // Request was aborted by chaos injection
+			h.Logger.WarnCtx(ctx).Msg("Request aborted by chaos injection")
+			// Insertar en BD con el status code modificado por chaos
+			h.insertTransactionToDB(c, location)
+
+			// --- FIN DEL HANDLER: CAPTURAR MÉTRICAS DE RESPUESTA ---
+			statusCode := strconv.Itoa(c.Writer.Status()) // Obtener el status code real después de chaos
+			prom.HandlerResquestTotal.WithLabelValues(requestPath, requestMethod, statusCode).Inc()
+			prom.HandlerRequestDuration.WithLabelValues(requestPath, requestMethod, statusCode).Observe(time.Since(start).Seconds())
+			prom.HandlerErrorsTotal.WithLabelValues(requestPath, requestMethod, "chaos_aborted").Inc() // Contar el error
+			// --- FIN DE CAPTURAR MÉTRICAS DE RESPUESTA ---
+
+			return
 		}
 	}
 
-	// Validate request body against schema if configured
-	if schema, ok := h.schemas[location.Path+":"+location.Method]; ok {
-		if err := h.validateRequestBody(c, schema); err != nil {
-			scribe.ErrorWithCtx(ctx).AnErr("validation_error", err).Msg("Schema validation failed")
+	if h.xsd[location.Path+":"+location.Method] != nil {
+		if err := validateXSD(c, location, h, ctx); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Schema validation failed: %v", err)})
 			return
+		}
+	}
+	// Validate request body against schema if configured
+	if !isValidXSD {
+		if schema, ok := h.schemas[location.Path+":"+location.Method]; ok {
+			if err := h.validateRequestBody(c, schema); err != nil {
+				h.Logger.ErrorCtx(ctx).AnErr("validation_error", err).Msg("Schema validation failed")
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Schema validation failed: %v", err)})
+				// Insertar en BD con el status code real (400)
+				h.insertTransactionToDB(c, location)
+
+				// --- FIN DEL HANDLER: CAPTURAR MÉTRICAS DE RESPUESTA ---
+				statusCode := strconv.Itoa(c.Writer.Status()) // Debería ser 400
+				prom.HandlerResquestTotal.WithLabelValues(requestPath, requestMethod, statusCode).Inc()
+				prom.HandlerRequestDuration.WithLabelValues(requestPath, requestMethod, statusCode).Observe(time.Since(start).Seconds())
+				prom.HandlerErrorsTotal.WithLabelValues(requestPath, requestMethod, "schema_validation_failed").Inc() // Contar el error
+				// --- FIN DE CAPTURAR MÉTRICAS DE RESPUESTA ---
+
+				return
+			}
 		}
 	}
 
@@ -127,11 +202,13 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 
 	// Handle async call if configured
 	if location.Async != nil {
-		scribe.InfoWithCtx(ctx).
+		h.Logger.InfoCtx(ctx).
 			Str("async_url", location.Async.Url).
 			Str("async_method", location.Async.Method).
 			Msg("Starting async call")
-		go h.handleAsyncCall(location.Async)
+		go h.handleAsyncCall(location.Async, c)
+		// Contar las llamadas asíncronas
+		prom.HandlerAsyncCallsTotal.WithLabelValues(requestPath, requestMethod, location.Async.Url).Inc()
 	}
 
 	// Set response status code
@@ -144,59 +221,108 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 		// Process template if it contains template variables
 		responseBody, err := h.processResponseTemplate(c, string(location.Response))
 		if err != nil {
-			scribe.ErrorWithCtx(ctx).AnErr("template_error", err).Msg("Error processing response template")
+			h.Logger.ErrorCtx(ctx).AnErr("template_error", err).Msg("Error processing response template")
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error processing response template"})
+			// Insertar en BD con el status code real (500)
+			h.insertTransactionToDB(c, location)
+
+			// --- FIN DEL HANDLER: CAPTURAR MÉTRICAS DE RESPUESTA ---
+			statusCode := strconv.Itoa(c.Writer.Status()) // Debería ser 500
+			prom.HandlerResquestTotal.WithLabelValues(requestPath, requestMethod, statusCode).Inc()
+			prom.HandlerRequestDuration.WithLabelValues(requestPath, requestMethod, statusCode).Observe(time.Since(start).Seconds())
+			prom.HandlerErrorsTotal.WithLabelValues(requestPath, requestMethod, "response_template_error").Inc() // Contar el error
+			// --- FIN DE CAPTURAR MÉTRICAS DE RESPUESTA ---
+
 			return
 		}
 
+		h.Logger.InfoCtx(ctx).Str("response", string(responseBody)).Msg("Response processed successfully")
 		c.String(location.StatusCode, responseBody)
 	}
 
-	scribe.InfoWithCtx(ctx).
+	h.Logger.InfoCtx(ctx).
 		Int("status_code", location.StatusCode).
 		Msg("Request completed successfully")
+
+	// Insertar en BD al finalizar la operación (casos exitosos)
+	h.insertTransactionToDB(c, location)
+
+	// --- FIN DEL HANDLER: CAPTURAR MÉTRICAS DE RESPUESTA ---
+	// Este es el punto final de ejecución exitosa del handler.
+	statusCode := strconv.Itoa(c.Writer.Status()) // Obtener el status code final.
+	prom.HandlerResquestTotal.WithLabelValues(requestPath, requestMethod, statusCode).Inc()
+	prom.HandlerRequestDuration.WithLabelValues(requestPath, requestMethod, statusCode).Observe(time.Since(start).Seconds())
+	// --- FIN DE CAPTURAR MÉTRICAS DE RESPUESTA ---
+}
+
+func validateXSD(c *gin.Context, location models.Location, h *Handler, ctx context.Context) error {
+	if xmlSchema, err := xsd.ParseSchema([]byte(*h.xsd[location.Path+":"+location.Method])); err != nil {
+		h.Logger.ErrorCtx(ctx).AnErr("error", err).Msg("Error parsing XSD, will try to parse as JSON Schema")
+		isValidXSD = false
+	} else {
+		if xmlSchema != nil {
+			err = h.validateXSD(c, *xmlSchema)
+
+			if err != nil {
+				h.Logger.ErrorCtx(ctx).AnErr("error", err).Msg("Error validating XSD")
+				return err
+			}
+			isValidXSD = true
+		} else {
+			h.Logger.InfoCtx(ctx).Msg("Error compiling schema")
+			return err
+		}
+	}
+	return nil
 }
 
 // validateRequestBody validates the request body against a JSON schema
 func (h *Handler) validateRequestBody(c *gin.Context, schema *jsonschema.Schema) error {
 	ctx := c.Request.Context()
 
-	scribe.DebugWithCtx(ctx).Msg("Starting request body validation")
+	h.Logger.InfoCtx(ctx).Msg("Starting request body validation")
 
 	// Read the request body
 	body, err := io.ReadAll(c.Request.Body)
-
 	if err != nil {
-		scribe.ErrorWithCtx(ctx).AnErr("error", err).Msg("Error reading request body")
+		h.Logger.ErrorCtx(ctx).AnErr("error", err).Msg("Error reading request body")
 		return fmt.Errorf("error reading request body: %w", err)
 	}
 
 	// Restore the request body for later use
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
 
-	defer c.Request.Body.Close()
-
 	// Parse the JSON
 	var data interface{}
+
 	if err := json.Unmarshal(body, &data); err != nil {
-		scribe.ErrorWithCtx(ctx).AnErr("error", err).Msg("Error parsing JSON")
+		h.Logger.ErrorCtx(ctx).AnErr("error", err).Msg("Error parsing JSON")
 		return fmt.Errorf("error parsing JSON: %w", err)
 	}
 
 	// Validate against the schema
 	if err := schema.Validate(data); err != nil {
-		scribe.ErrorWithCtx(ctx).AnErr("validation_error", err).Msg("Schema validation failed")
+		h.Logger.ErrorCtx(ctx).AnErr("validation_error", err).Msg("Schema validation failed")
 		return err
 	}
 
-	scribe.DebugWithCtx(ctx).Msg("Request body validation successful")
+	h.Logger.DebugCtx(ctx).Msg("Request body validation successful")
 
 	return nil
 }
 
 // handleAsyncCall handles an asynchronous HTTP call
-func (h *Handler) handleAsyncCall(async *models.Async) {
-	logger.Debug().
+func (h *Handler) handleAsyncCall(async *models.Async, c *gin.Context) {
+
+	ctx := scribe.WithCtx(c.Request.Context())
+
+	lc := scribe.GetLogContext(ctx)
+	lc.Set("async_request_trace_id", uuid.New().String())
+
+	r := c.Request.WithContext(ctx)
+	c.Request = r
+
+	h.Logger.DebugCtx(ctx).
 		Str("url", async.Url).
 		Str("method", async.Method).
 		Msg("Creating async HTTP request")
@@ -215,7 +341,7 @@ func (h *Handler) handleAsyncCall(async *models.Async) {
 
 	req, err := http.NewRequest(async.Method, async.Url, body)
 	if err != nil {
-		logger.Error().
+		h.Logger.ErrorCtx(ctx).
 			Str("url", async.Url).
 			Str("method", async.Method).
 			AnErr("error", err).
@@ -255,7 +381,7 @@ func (h *Handler) handleAsyncCall(async *models.Async) {
 		}
 
 		if i < retries-1 {
-			logger.Warn().
+			h.Logger.WarnCtx(ctx).
 				Str("url", async.Url).
 				Int("attempt", i+1).
 				Int("max_retries", retries-1).
@@ -267,7 +393,7 @@ func (h *Handler) handleAsyncCall(async *models.Async) {
 
 	// Handle response
 	if lastErr != nil {
-		logger.Error().
+		h.Logger.ErrorCtx(ctx).
 			Str("url", async.Url).
 			Str("method", async.Method).
 			Int("retries", retries-1).
@@ -278,7 +404,7 @@ func (h *Handler) handleAsyncCall(async *models.Async) {
 	defer resp.Body.Close()
 
 	// Log response status
-	logger.Info().
+	h.Logger.InfoCtx(ctx).
 		Str("url", async.Url).
 		Str("method", async.Method).
 		Str("status", resp.Status).
@@ -294,7 +420,8 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 	}
 
 	// Parse request body to extract data for template variables
-	var requestData interface{}
+	// Utilizamos map[string]interface{} para que las propiedades del JSON (como .Amount) sean accesibles
+	var requestData map[string]interface{}
 	if c.Request.Body != nil {
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
@@ -305,13 +432,14 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
 
 		if len(body) > 0 {
+			// Intentamos hacer Unmarshal en un mapa para facilitar el acceso por nombre de campo
 			if err := json.Unmarshal(body, &requestData); err != nil {
 				return "", fmt.Errorf("error parsing request JSON: %w", err)
 			}
 		}
 	}
 
-	// Create template with custom functions
+	// Create template with custom functions (incluyendo randInt y now que devuelve time.Time)
 	tmpl, err := template.New("response").Funcs(template.FuncMap{
 		"toJson": func(v interface{}) string {
 			jsonBytes, err := json.Marshal(v)
@@ -320,8 +448,15 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 			}
 			return string(jsonBytes)
 		},
-		"now": func() string {
-			return time.Now().Format(time.RFC3339)
+		// Devuelve un objeto time.Time para que la plantilla pueda llamar a .Format
+		"now": func() time.Time {
+			return time.Now()
+		},
+		// Agrega la función randInt necesaria para generar números aleatorios
+		"randInt": func(min, max int) int {
+			// Nota: La siembra de rand debería idealmente hacerse una sola vez al inicio del programa.
+			rand.Seed(time.Now().UnixNano())
+			return rand.Intn(max-min) + min
 		},
 	}).Parse(responseTemplate)
 
@@ -329,11 +464,172 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 		return "", fmt.Errorf("error parsing template: %w", err)
 	}
 
-	// Execute template with request data
+	// Execute template with request data (map[string]interface{} pasado como contexto raíz)
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, requestData); err != nil {
+		// Si el error persiste aquí, es probable que la sintaxis de la plantilla (YAML) sea el problema.
 		return "", fmt.Errorf("error executing template: %w", err)
 	}
 
 	return buf.String(), nil
+}
+
+func (h *Handler) validateXSD(c *gin.Context, schema xsd.Schema) error {
+	body := c.Request.Body
+
+	bodyBytes, err := io.ReadAll(body)
+
+	if err != nil {
+		return fmt.Errorf("error reading request body: %w", err)
+	}
+
+	doc := golibxml.ParseDoc(string(bodyBytes))
+
+	if doc == nil {
+		return fmt.Errorf("error parsing request body")
+	}
+
+	defer doc.Free()
+	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	if err := schema.Validate(xsd.DocPtr(unsafe.Pointer(doc.Ptr))); err != nil {
+		return fmt.Errorf("error validating schema: %w", err)
+	}
+
+	return nil
+}
+
+// insertTransactionToDB inserta la transacción en la base de datos
+func (h *Handler) insertTransactionToDB(c *gin.Context, location models.Location) {
+	if h.BatchManager == nil {
+		h.Logger.Warn().Msg("BatchManager is nil, skipping database insertion")
+		return
+	}
+
+	// Verificar si BatchManager está corriendo
+	if !h.BatchManager.IsRunning() {
+		h.Logger.Warn().Msg("BatchManager is not running, skipping database insertion")
+		return
+	}
+
+	// Extraer datos del request
+	requestHeaders, _ := json.Marshal(c.Request.Header)
+	requestBody := h.getRequestBody(c)
+	responseHeaders, _ := json.Marshal(c.Writer.Header())
+	responseBody := h.getActualResponseBody(c, location)
+
+	// Obtener el status code real del response writer
+	actualStatusCode := h.getActualStatusCode(c)
+
+	// Crear Mockdata
+	recepcionID := c.GetHeader("X-Recepcion-ID")
+	if recepcionID == "" {
+		recepcionID = uuid.New().String()
+	}
+
+	senderID := c.GetHeader("X-Sender-ID")
+	if senderID == "" {
+		senderID = uuid.New().String()
+	}
+
+	operation := &database.Mockdata{
+		UUID:               uuid.New().String(),
+		RecepcionID:        recepcionID,
+		SenderID:           senderID,
+		RequestHeaders:     string(requestHeaders),
+		RequestMethod:      c.Request.Method,
+		RequestEndpoint:    c.Request.URL.Path,
+		RequestBody:        requestBody,
+		ResponseHeaders:    string(responseHeaders),
+		ResponseBody:       responseBody,
+		ResponseStatusCode: actualStatusCode,
+		Timestamp:          time.Now(),
+	}
+
+	// Insertar en batch
+	if err := h.BatchManager.AddOperation(operation); err != nil {
+		h.Logger.Error().
+			Str("uuid", operation.UUID).
+			Str("recepcion_id", operation.RecepcionID).
+			AnErr("error", err).
+			Msg("Error inserting transaction to database")
+	} else {
+		h.Logger.Info().
+			Str("uuid", operation.UUID).
+			Str("recepcion_id", operation.RecepcionID).
+			Str("method", operation.RequestMethod).
+			Str("endpoint", operation.RequestEndpoint).
+			Int("status_code", actualStatusCode).
+			Msg("Transaction added to batch successfully")
+	}
+}
+
+// getRequestBody extrae el body del request
+func (h *Handler) getRequestBody(c *gin.Context) string {
+	if c.Request.Body == nil {
+		return ""
+	}
+
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		h.Logger.Error().AnErr("error", err).Msg("Error reading request body for database")
+		return ""
+	}
+
+	// Restaurar el body para uso posterior
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+	return string(body)
+}
+
+// getResponseBody extrae el body de la respuesta
+func (h *Handler) getResponseBody(c *gin.Context, location models.Location) string {
+	if location.Response == "" {
+		return ""
+	}
+
+	// Procesar template si existe
+	responseBody, err := h.processResponseTemplate(c, string(location.Response))
+	if err != nil {
+		return string(location.Response)
+	}
+
+	return responseBody
+}
+
+// getActualStatusCode obtiene el status code real del response writer
+func (h *Handler) getActualStatusCode(c *gin.Context) int {
+	// En Gin, el status code se puede obtener del response writer
+	// Si no se ha establecido, devuelve 200 por defecto
+	if c.Writer.Status() == 0 {
+		return 200
+	}
+	return c.Writer.Status()
+}
+
+// getActualResponseBody obtiene el response body real que se envió al cliente
+func (h *Handler) getActualResponseBody(c *gin.Context, location models.Location) string {
+	// Verificar si el chaos injection se activó
+	// Si el status code es diferente al configurado, significa que hubo chaos injection
+	actualStatusCode := h.getActualStatusCode(c)
+
+	// Si hay chaos injection activado (status code diferente al configurado)
+	if location.ChaosInjection != nil && actualStatusCode != location.StatusCode {
+		// Para casos de chaos injection, devolver el response del chaos config
+		if location.ChaosInjection.Error.Response != "" {
+			return location.ChaosInjection.Error.Response
+		}
+		// Si no hay response específico en chaos, devolver string vacío
+		return ""
+	}
+
+	// Para casos normales (sin chaos injection), usar el response configurado
+	if location.Response != "" {
+		responseBody, err := h.processResponseTemplate(c, string(location.Response))
+		if err != nil {
+			return string(location.Response)
+		}
+		return responseBody
+	}
+
+	return ""
 }
