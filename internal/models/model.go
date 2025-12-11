@@ -20,7 +20,7 @@ type Server struct {
 	LoggerPath     *string         `yaml:"logger_path" json:"logger_path"`
 	Name           *string         `yaml:"name" json:"name"`
 	Version        *string         `yaml:"version" json:"version"`
-	ChaosInjection *ChaosInjection `yaml:"chaos_injection" json:"chaosInjection"`
+	ChaosInjection *ChaosInjection `yaml:"chaos_injection" json:"chaos_injection"`
 	Location       []Location      `yaml:"location" json:"location"`
 }
 
@@ -41,7 +41,7 @@ type Location struct {
 	Async          *Async          `yaml:"async" json:"async"`
 	Headers        *Headers        `yaml:"headers" json:"headers"`
 	StatusCode     int             `yaml:"status_code" json:"statusCode"`
-	ChaosInjection *ChaosInjection `yaml:"chaos_injection" json:"chaosInjection"`
+	ChaosInjection *ChaosInjection `yaml:"chaos_injection" json:"chaos_injection"`
 }
 
 type Headers map[string]string

@@ -10,7 +10,7 @@ type Http struct {
 type Server struct {
 	Listen         int             `yaml:"listen" json:"listen"`
 	Logger         *bool           `yaml:"logger" json:"logger"`
-	ChaosInjection *ChaosInjection `yaml:"chaos_injection" json:"chaosInjection"`
+	ChaosInjection *ChaosInjection `yaml:"chaos_injection" json:"chaos_injection"`
 	Location       []Location      `yaml:"location" json:"location"`
 }
 
@@ -22,7 +22,7 @@ type Location struct {
 	Async          *Async          `yaml:"async" json:"async"`
 	Headers        *Headers        `yaml:"headers" json:"headers"`
 	StatusCode     int             `yaml:"status_code" json:"statusCode"`
-	ChaosInjection *ChaosInjection `yaml:"chaos_injection" json:"chaosInjection"`
+	ChaosInjection *ChaosInjection `yaml:"chaos_injection" json:"chaos_injection"`
 }
 
 type Response string

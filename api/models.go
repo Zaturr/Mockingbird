@@ -110,8 +110,8 @@ func (p ProbabilityString) MarshalJSON() ([]byte, error) {
 	return json.Marshal(string(p))
 }
 
-// ChaosInjection represents chaos injection configuration
-type ChaosInjection struct {
+// chaosInjection represents chaos injection configuration
+type chaos_injection struct {
 	Latency *Latency `yaml:"latency,omitempty" json:"latency,omitempty"`
 	Abort   *Abort   `yaml:"abort,omitempty" json:"abort,omitempty"`
 	Error   *Error   `yaml:"error,omitempty" json:"error,omitempty"`
@@ -138,14 +138,14 @@ type Error struct {
 
 // ServerLocation represents a server location configuration
 type ServerLocation struct {
-	Path           string          `yaml:"path" json:"path" validate:"required"`
-	Method         string          `yaml:"method" json:"method" validate:"required,oneof=GET POST PUT DELETE PATCH"`
-	Response       string          `yaml:"response" json:"response"`
-	StatusCode     int             `yaml:"status_code" json:"status_code" validate:"min=100,max=599"`
-	Headers        *Headers        `yaml:"headers" json:"headers"`
-	Schema         string          `yaml:"schema" json:"schema"`
-	ChaosInjection *ChaosInjection `yaml:"chaos_injection" json:"chaosInjection"`
-	Async          *Async         `yaml:"async,omitempty" json:"async,omitempty"`
+	Path            string           `yaml:"path" json:"path" validate:"required"`
+	Method          string           `yaml:"method" json:"method" validate:"required,oneof=GET POST PUT DELETE PATCH"`
+	Response        string           `yaml:"response" json:"response"`
+	StatusCode      int              `yaml:"status_code" json:"status_code" validate:"min=100,max=599"`
+	Headers         *Headers         `yaml:"headers" json:"headers"`
+	Schema          string           `yaml:"schema" json:"schema"`
+	Chaos_injection *chaos_injection `yaml:"chaos_injection" json:"chaos_injection"`
+	Async           *Async           `yaml:"async,omitempty" json:"async,omitempty"`
 }
 
 // ServerConfig represents a server configuration
