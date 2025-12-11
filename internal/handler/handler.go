@@ -15,6 +15,7 @@ import (
 	"catalyst/database"
 
 	"catalyst/internal/chaos"
+	"catalyst/internal/invalid"
 	"catalyst/internal/models"
 	prom "catalyst/prometheus"
 
@@ -183,7 +184,10 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 
 	// Set response body if configured
 	if location.Response != "" {
-		c.Header("Content-Type", "application/json")
+		// Solo establecer Content-Type si no fue definido en los headers del config
+		if location.Headers == nil || (*location.Headers)["Content-Type"] == "" {
+			c.Header("Content-Type", "application/json")
+		}
 
 		// Process template if it contains template variables
 		responseBody, err := h.processResponseTemplate(c, string(location.Response))
@@ -384,6 +388,19 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 		}
 	}
 
+	// Agregar query parameters al contexto del template
+	if requestData == nil {
+		requestData = make(map[string]interface{})
+	}
+	// Agregar query params como .Query.paramName en el template
+	queryParams := make(map[string]string)
+	for key, values := range c.Request.URL.Query() {
+		if len(values) > 0 {
+			queryParams[key] = values[0] // Tomar el primer valor
+		}
+	}
+	requestData["Query"] = queryParams
+
 	// Create template with custom functions (incluyendo randInt y now que devuelve time.Time)
 	tmpl, err := template.New("response").Funcs(template.FuncMap{
 		"toJson": func(v interface{}) string {
@@ -402,6 +419,31 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 			// Nota: La siembra de rand debería idealmente hacerse una sola vez al inicio del programa.
 			rand.Seed(time.Now().UnixNano())
 			return rand.Intn(max-min) + min
+		},
+		// Genera un valor UTF-8 inválido o válido según query param
+		// Si existe query param "utf8_type", genera UTF-8 inválido del tipo especificado
+		// Si no existe el query param, genera UTF-8 válido por defecto
+		// Uso: {{ invalidUTF8 }} o {{ invalidUTF8 "random" }}
+		"invalidUTF8": func(args ...string) string {
+			// Leer query param "utf8_type" si existe
+			utf8Type := c.Query("utf8_type")
+
+			// Si hay query param, usarlo (tiene prioridad sobre argumentos)
+			if utf8Type != "" {
+				return invalid.GetInvalidUTF8ByTypeName(utf8Type)
+			}
+
+			// Si se pasó un argumento, usarlo
+			if len(args) > 0 && args[0] != "" {
+				return invalid.GetInvalidUTF8ByTypeName(args[0])
+			}
+
+			// Por defecto, generar UTF-8 válido
+			return invalid.GenerateValidUTF8()
+		},
+		// Función helper para obtener query param desde el template
+		"query": func(key string) string {
+			return c.Query(key)
 		},
 	}).Parse(responseTemplate)
 
