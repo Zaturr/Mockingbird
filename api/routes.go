@@ -113,7 +113,9 @@ func (rg *RouteGroup) SetupDataRoutes(router *gin.RouterGroup) {
 func (rg *RouteGroup) SetupConfigRoutes(router *gin.RouterGroup) {
 	config := router.Group("/config")
 	{
+		config.POST("", ValidateServerName(), rg.handler.CreateServerConfig) //Crear servidor
 		config.GET("", ValidateServerName(), rg.handler.GetConfig)
+		config.GET("/servers", rg.handler.ListServers)
 		config.PUT("", ValidateServerName(), rg.handler.UpdateConfig)
 		config.PUT("/yaml", rg.handler.UpdateConfigYaml)
 	}

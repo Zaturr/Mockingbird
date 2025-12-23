@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -196,6 +197,61 @@ func (h *APIHandler) UpdateConfig(c *gin.Context) {
 	}
 }
 
+// ListServers returns the list of available server configs
+func (h *APIHandler) ListServers(c *gin.Context) {
+	cfgSvc := NewConfigService(h.configDir)
+	servers, err := cfgSvc.ListServerNames()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse(err, http.StatusInternalServerError, "Error listing servers"))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"servers": servers,
+	})
+}
+
+// Create new server config POST /api/mock/config
+func (h *APIHandler) CreateServerConfig(c *gin.Context) {
+	serverName := strings.TrimSpace(c.Query("server_name"))
+	if serverName == "" {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(ErrInvalidServer, http.StatusBadRequest, "server_name parameter is required"))
+		return
+	}
+
+	cfgSvc := NewConfigService(h.configDir)
+
+	if _, exists := cfgSvc.findConfigFile(serverName); exists {
+		c.JSON(http.StatusConflict, NewErrorResponse(fmt.Errorf("config already exists"), http.StatusConflict, "Configuration already exists"))
+		return
+	}
+
+	initial := map[string]interface{}{
+		"http": map[string]interface{}{
+			"servers": []interface{}{
+				map[string]interface{}{
+					"listen":      0,
+					"server_name": serverName,
+				},
+			},
+		},
+	}
+
+	data, err := yaml.Marshal(initial)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse(err, http.StatusInternalServerError, "Error building config"))
+		return
+	}
+
+	path := filepath.Join(h.configDir, serverName+".yml")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse(err, http.StatusInternalServerError, "Error writing config file"))
+		return
+	}
+
+	c.JSON(http.StatusCreated, initial)
+}
+
 // GetAllRecords retrieves all records from the database
 func (ds *DatabaseService) GetAllRecords() ([]DatabaseRecord, error) {
 	if ds.batchManager == nil || ds.batchManager.DB == nil {
@@ -303,6 +359,35 @@ func (cs *ConfigService) findConfigFile(serverName string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// ListServerNames lists all available server config filenames (without extension)
+func (cs *ConfigService) ListServerNames() ([]string, error) {
+	extensions := []string{".yml", ".yaml"}
+	serverSet := make(map[string]struct{})
+
+	for _, ext := range extensions {
+		pattern := filepath.Join(cs.configDir, "*"+ext)
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list configs: %w", err)
+		}
+		for _, file := range matches {
+			base := filepath.Base(file)
+			name := strings.TrimSuffix(strings.TrimSuffix(base, ".yml"), ".yaml")
+			if name != "" {
+				serverSet[name] = struct{}{}
+			}
+		}
+	}
+
+	servers := make([]string, 0, len(serverSet))
+	for name := range serverSet {
+		servers = append(servers, name)
+	}
+	sort.Strings(servers)
+
+	return servers, nil
 }
 
 // GetAllUsedPorts retrieves all ports in use by other servers, excluding the specified server
