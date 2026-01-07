@@ -1,7 +1,0 @@
-http:
-    servers:
-        - listen: 1111
-          logger: false
-          logger_path: ""
-          name: ""
-          version: ""
