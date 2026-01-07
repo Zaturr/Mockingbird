@@ -252,6 +252,29 @@ func (h *APIHandler) CreateServerConfig(c *gin.Context) {
 	c.JSON(http.StatusCreated, initial)
 }
 
+// DeleteServerConfig handles DELETE /api/mock/config - deletes a server config
+func (h *APIHandler) DeleteServerConfig(c *gin.Context) {
+	serverName := strings.TrimSpace(c.Query("server_name"))
+	if serverName == "" {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(ErrInvalidServer, http.StatusBadRequest, "server_name parameter is required"))
+		return
+	}
+
+	fileName := fmt.Sprintf("%s.yml", serverName)
+	filePath := filepath.Join(h.configDir, fileName)
+
+	err := os.Remove(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			c.JSON(http.StatusNotFound, NewErrorResponse(err, http.StatusNotFound, "El servidor no existe"))
+			return
+		}
+		c.JSON(http.StatusInternalServerError, NewErrorResponse(err, http.StatusInternalServerError, "No se pudo eliminar el archivo"))
+		return
+	}
+	c.JSON(http.StatusOK, NewSuccessResponse(nil, fmt.Sprintf("Servidor %s eliminado correctamente", serverName)))
+}
+
 // GetAllRecords retrieves all records from the database
 func (ds *DatabaseService) GetAllRecords() ([]DatabaseRecord, error) {
 	if ds.batchManager == nil || ds.batchManager.DB == nil {

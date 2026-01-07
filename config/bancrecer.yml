@@ -2,7 +2,18 @@ http:
     servers:
         - listen: 1231
           location:
-            - headers:
+            - chaos_injection:
+                abort:
+                    code: 0
+                    probability: 0
+                error:
+                    code: 855
+                    probability: 98
+                    response: '{"message":"mensaje de prueba"}'
+                latency:
+                    probability: 0
+                    time: 0
+              headers:
                 Content-Type: application/json
               method: POST
               path: /bancrecer/simf/1.0.0/enviar
@@ -155,18 +166,26 @@ http:
               method: GET
               path: /debit/v2/operation
               response: '[ { "OperationDate": "{{ now.Format "2006-01-02T15:04:05" }}", "Reference": "{{ randInt 10000000 99999999 }}", "EndToEndId": "0168{{ now.Format "20060102150405" }}{{ randInt 100 999 }}", "OriginId": "V{{ randInt 100000 999999 }}", "OriginName": "PRUEBA", "OriginAccount": "0168{{ randInt 1000000000000000 9999999999999999 }}", "OriginBank": "0168", "OriginBankName": "Bancrecer", "DestinyBank": "0168", "DestinyBankName": "Bancrecer", "DestinyAccount": "0168{{ randInt 1000000000000000 9999999999999999 }}", "Symbol": "Bs.", "Amount": {{ randInt 1 10000 }}, "Currency": "VES", "Description": "Prueba", "StatusCode": {{ randInt 1 6 }}, "Status": "{{ if eq (randInt 1 3) 1 }}Aprobado{{ else if eq (randInt 1 3) 2 }}Pendiente{{ else }}Rechazado{{ end }}", "StatusIcon": "highlight_off", "StatusCss": "{{ if eq (randInt 1 3) 1 }}StatusApprove{{ else if eq (randInt 1 3) 2 }}StatusPending{{ else }}StatusReject{{ end }}", "DestinyIdType": "SCID", "DestinyId": "V{{ randInt 100000 999999 }}", "DestinyName": "Prueba", "DestinyType": "CNTA", "Service": "Debito Inmediato", "Message": "", "Mask": "0000-0000-00-0000000000", "CanApprove": {{ if eq (randInt 1 2) 1 }}true{{ else }}false{{ end }}, "ReasonCode": "", "Reason": "" } ]'
+              schema: ""
               status_code: 200
             - headers:
                 Content-Type: application/json
               method: GET
               path: /debit/v2/operations/date
               response: '[ { "OperationDate": "{{ now.Format "2006-01-02T15:04:05" }}", "Reference": "{{ randInt 10000000 99999999 }}", "EndToEndId": "0168{{ now.Format "20060102150405" }}{{ randInt 100 999 }}", "OriginId": "V{{ randInt 100000 999999 }}", "OriginName": "PRUEBA", "OriginAccount": "0168{{ randInt 1000000000000000 9999999999999999 }}", "OriginBank": "0168", "OriginBankName": "Bancrecer", "DestinyBank": "0168", "DestinyBankName": "Bancrecer", "DestinyAccount": "0168{{ randInt 1000000000000000 9999999999999999 }}", "Symbol": "Bs.", "Amount": {{ randInt 1 10000 }}, "Currency": "VES", "Description": "Prueba", "StatusCode": {{ randInt 1 6 }}, "Status": "{{ if eq (randInt 1 3) 1 }}Aprobado{{ else if eq (randInt 1 3) 2 }}Pendiente{{ else }}Rechazado{{ end }}", "StatusIcon": "highlight_off", "StatusCss": "{{ if eq (randInt 1 3) 1 }}StatusApprove{{ else if eq (randInt 1 3) 2 }}StatusPending{{ else }}StatusReject{{ end }}", "DestinyIdType": "SCID", "DestinyId": "V{{ randInt 100000 999999 }}", "DestinyName": "Prueba", "DestinyType": "CNTA", "Service": "Debito Inmediato", "Message": "", "Mask": "0000-0000-00-0000000000", "CanApprove": {{ if eq (randInt 1 2) 1 }}true{{ else }}false{{ end }}, "ReasonCode": "", "Reason": "" } ]'
+              schema: ""
               status_code: 200
             - chaos_injection:
+                abort:
+                    code: 0
+                    probability: 0
                 error:
                     code: 456
                     probability: 100
                     response: 'Error: calculado'
+                latency:
+                    probability: 0
+                    time: 0
               headers:
                 Content-Type: application/json
               method: POST
@@ -209,6 +228,7 @@ http:
               method: POST
               path: /async
               response: '{"Message": "hello world"}'
+              schema: ""
               status_code: 200
           logger: true
           logger_path: ./log/bancrecer

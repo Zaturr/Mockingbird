@@ -118,6 +118,7 @@ func (rg *RouteGroup) SetupConfigRoutes(router *gin.RouterGroup) {
 		config.GET("/servers", rg.handler.ListServers)
 		config.PUT("", ValidateServerName(), rg.handler.UpdateConfig)
 		config.PUT("/yaml", rg.handler.UpdateConfigYaml)
+		config.DELETE("", ValidateServerName(), rg.handler.DeleteServerConfig) //Eliminar servidor
 	}
 }
 
