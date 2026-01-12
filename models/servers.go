@@ -19,7 +19,7 @@ type Location struct {
 	Method         string          `yaml:"method" json:"method"`
 	Schema         Schema          `yaml:"schema" json:"schema"`
 	Response       *Response       `yaml:"response" json:"response"`
-	Async          *Async          `yaml:"async" json:"async"`
+	Async          []Async         `yaml:"async" json:"async"`
 	Headers        *Headers        `yaml:"headers" json:"headers"`
 	StatusCode     int             `yaml:"status_code" json:"statusCode"`
 	ChaosInjection *ChaosInjection `yaml:"chaos_injection" json:"chaos_injection"`
