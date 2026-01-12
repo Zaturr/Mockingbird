@@ -170,13 +170,15 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 
 	// Handle async call if configured
 	if location.Async != nil {
-		h.Logger.InfoCtx(ctx).
-			Str("async_url", location.Async.Url).
-			Str("async_method", location.Async.Method).
-			Msg("Starting async call")
-		go h.handleAsyncCall(location.Async, c)
-		// Contar las llamadas asíncronas
-		prom.HandlerAsyncCallsTotal.WithLabelValues(requestPath, requestMethod, location.Async.Url).Inc()
+		for _, v := range location.Async {
+			h.Logger.InfoCtx(ctx).
+				Str("async_url", v.Url).
+				Str("async_method", v.Method).
+				Msg("Starting async call")
+			go h.handleAsyncCall(&v, c)
+			// Contar las llamadas asíncronas
+			prom.HandlerAsyncCallsTotal.WithLabelValues(requestPath, requestMethod, v.Url).Inc()
+		}
 	}
 
 	// Set response status code
