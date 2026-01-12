@@ -45,13 +45,26 @@ type Manager struct {
 	configs        []*models.MockServer
 	configDir      string
 	restartManager *api.RestartManager
+	logger         *scribe.Scribe
 }
 
 func NewManager() *Manager {
+
+	m := models.LogDescriptor{
+		Name:    "",
+		Version: "",
+		Path:    "",
+		File:    false,
+		Logger:  true,
+	}
+
+	logCtx, _ := logger.GetLoggerContext(m)
+
 	return &Manager{
 		servers:     make(map[int]*Server),
 		restartChan: make(chan string, 10),
 		configs:     make([]*models.MockServer, 0),
+		logger:      logCtx,
 	}
 }
 
@@ -94,7 +107,8 @@ func (m *Manager) CreateServer(config models.Server) error {
 
 	db, err := database.InitDB("./database.db")
 	if err != nil {
-		return fmt.Errorf("error initializing database: %v", err)
+		log.Error().AnErr("error initializing database:", err).Msg("error initializing database")
+		return err
 	}
 
 	batchConfig := database.BatchConfig{
@@ -109,6 +123,7 @@ func (m *Manager) CreateServer(config models.Server) error {
 	batchManager := database.NewBatchManager(db, batchConfig)
 
 	if err := batchManager.Start(); err != nil {
+		log.Error().AnErr("error initializing batch nanager:", err).Msg("error initializing database")
 		return fmt.Errorf("error starting batch manager: %v", err)
 	}
 
@@ -136,7 +151,8 @@ func (m *Manager) CreateServer(config models.Server) error {
 func (s *Server) registerRoutes() error {
 	for _, location := range s.locations {
 		if err := s.handler.RegisterLocation(location); err != nil {
-			return fmt.Errorf("error registering location %s: %w", location.Path, err)
+			s.logger.Error().AnErr(fmt.Sprintf("error registering location %s: %w", location.Path, err), err)
+			return err
 		}
 
 		if location.StaticFilesDir != "" {
@@ -178,7 +194,7 @@ func (s *Server) Start() error {
 		Handler: s.Router,
 	}
 
-	log.Printf("Starting server on %s", addr)
+	s.logger.Info().Msg(fmt.Sprintf("Starting server on port %d", s.Port))
 	return s.httpServer.ListenAndServe()
 }
 
