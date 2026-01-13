@@ -79,12 +79,33 @@ func (m *Manager) CreateServer(config models.Server) error {
 	var log *scribe.Scribe
 	var err error
 
+	// Provide default values for optional fields
+	name := "SERVER"
+	if config.Name != nil {
+		name = *config.Name
+	}
+
+	version := "0.0.1"
+	if config.Version != nil {
+		version = *config.Version
+	}
+
+	loggerPath := ""
+	if config.LoggerPath != nil {
+		loggerPath = *config.LoggerPath
+	}
+
+	loggerEnabled := false
+	if config.Logger != nil {
+		loggerEnabled = *config.Logger
+	}
+
 	log, err = logger.GetLoggerContext(models.LogDescriptor{
-		Name:    *config.Name,
-		Version: *config.Version,
-		Path:    *config.LoggerPath,
-		File:    *config.Logger,
-		Logger:  *config.Logger,
+		Name:    name,
+		Version: version,
+		Path:    loggerPath,
+		File:    loggerEnabled,
+		Logger:  loggerEnabled,
 	})
 
 	if err != nil {
