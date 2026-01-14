@@ -140,12 +140,13 @@ type Error struct {
 type ServerLocation struct {
 	Path            string           `yaml:"path" json:"path" validate:"required"`
 	Method          string           `yaml:"method" json:"method" validate:"required,oneof=GET POST PUT DELETE PATCH"`
-	Response        string           `yaml:"response" json:"response"`
+	Response        string           `yaml:"response" json:"response,omitempty"`
+	Body            string           `yaml:"body" json:"body,omitempty"`
 	StatusCode      int              `yaml:"status_code" json:"status_code" validate:"min=100,max=599"`
 	Headers         *Headers         `yaml:"headers" json:"headers"`
 	Schema          string           `yaml:"schema" json:"schema"`
 	Chaos_injection *chaos_injection `yaml:"chaos_injection" json:"chaos_injection"`
-	Async           *Async           `yaml:"async,omitempty" json:"async,omitempty"`
+	Async           []Async          `yaml:"async,omitempty" json:"async,omitempty"`
 }
 
 // ServerConfig represents a server configuration
