@@ -48,6 +48,7 @@ type Headers map[string]string
 
 type Async struct {
 	Url        string   `yaml:"url" json:"url"`
+	Path       string   `yaml:"path" json:"path"`
 	Body       string   `yaml:"body" json:"body"`
 	Method     string   `yaml:"method" json:"method"`
 	Headers    *Headers `yaml:"headers" json:"headers"`

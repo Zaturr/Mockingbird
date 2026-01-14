@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -24,6 +25,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
+
+// randomCache almacena los valores aleatorios generados por transacción
+var randomCache = make(map[string]map[string]interface{})
+var randomCacheMutex sync.RWMutex
 
 // Handler manages HTTP request handling based on configuration
 type Handler struct {
@@ -171,13 +176,17 @@ func (h *Handler) HandleRequest(c *gin.Context, location models.Location) {
 	// Handle async call if configured
 	if location.Async != nil {
 		for _, v := range location.Async {
+			asyncURL := v.Url
+			if v.Path != "" {
+				asyncURL = v.Path
+			}
 			h.Logger.InfoCtx(ctx).
-				Str("async_url", v.Url).
+				Str("async_url", asyncURL).
 				Str("async_method", v.Method).
 				Msg("Starting async call")
 			go h.handleAsyncCall(&v, c)
 			// Contar las llamadas asíncronas
-			prom.HandlerAsyncCallsTotal.WithLabelValues(requestPath, requestMethod, v.Url).Inc()
+			prom.HandlerAsyncCallsTotal.WithLabelValues(requestPath, requestMethod, asyncURL).Inc()
 		}
 	}
 
@@ -273,8 +282,23 @@ func (h *Handler) handleAsyncCall(async *models.Async, c *gin.Context) {
 	r := c.Request.WithContext(ctx)
 	c.Request = r
 
+	// Construir la URL: si hay Path, construir URL completa; si hay Url, usarla directamente
+	asyncURL := async.Url
+	if async.Path != "" {
+		// Es un path relativo, construir la URL completa basándose en el request actual
+		scheme := "http"
+		if c.Request.TLS != nil {
+			scheme = "https"
+		}
+		host := c.Request.Host
+		if host == "" {
+			host = "localhost"
+		}
+		asyncURL = fmt.Sprintf("%s://%s%s", scheme, host, async.Path)
+	}
+
 	h.Logger.DebugCtx(ctx).
-		Str("url", async.Url).
+		Str("url", asyncURL).
 		Str("method", async.Method).
 		Msg("Creating async HTTP request")
 
@@ -287,13 +311,25 @@ func (h *Handler) handleAsyncCall(async *models.Async, c *gin.Context) {
 	// Create request
 	var body io.Reader
 	if async.Body != "" {
-		body = strings.NewReader(async.Body)
+		// Procesar el template del body async con los mismos valores aleatorios del request principal
+		processedBody, err := h.processResponseTemplate(c, async.Body)
+		if err != nil {
+			h.Logger.ErrorCtx(ctx).
+				Str("url", asyncURL).
+				Str("method", async.Method).
+				AnErr("error", err).
+				Msg("Error processing async body template")
+			// Si hay error, usar el body original sin procesar
+			body = strings.NewReader(async.Body)
+		} else {
+			body = strings.NewReader(processedBody)
+		}
 	}
 
-	req, err := http.NewRequest(async.Method, async.Url, body)
+	req, err := http.NewRequest(async.Method, asyncURL, body)
 	if err != nil {
 		h.Logger.ErrorCtx(ctx).
-			Str("url", async.Url).
+			Str("url", asyncURL).
 			Str("method", async.Method).
 			AnErr("error", err).
 			Msg("Error creating async request")
@@ -305,6 +341,11 @@ func (h *Handler) handleAsyncCall(async *models.Async, c *gin.Context) {
 		for key, value := range *async.Headers {
 			req.Header.Set(key, value)
 		}
+	}
+
+	// Pasar el transaction ID a los async requests para que puedan usar los mismos valores aleatorios
+	if transactionID, exists := c.Get("transactionID"); exists {
+		req.Header.Set("X-Transaction-ID", transactionID.(string))
 	}
 
 	// Set default content type if not specified
@@ -333,7 +374,7 @@ func (h *Handler) handleAsyncCall(async *models.Async, c *gin.Context) {
 
 		if i < retries-1 {
 			h.Logger.WarnCtx(ctx).
-				Str("url", async.Url).
+				Str("url", asyncURL).
 				Int("attempt", i+1).
 				Int("max_retries", retries-1).
 				AnErr("error", lastErr).
@@ -345,7 +386,7 @@ func (h *Handler) handleAsyncCall(async *models.Async, c *gin.Context) {
 	// Handle response
 	if lastErr != nil {
 		h.Logger.ErrorCtx(ctx).
-			Str("url", async.Url).
+			Str("url", asyncURL).
 			Str("method", async.Method).
 			Int("retries", retries-1).
 			AnErr("error", lastErr).
@@ -356,7 +397,7 @@ func (h *Handler) handleAsyncCall(async *models.Async, c *gin.Context) {
 
 	// Log response status
 	h.Logger.InfoCtx(ctx).
-		Str("url", async.Url).
+		Str("url", asyncURL).
 		Str("method", async.Method).
 		Str("status", resp.Status).
 		Int("status_code", resp.StatusCode).
@@ -384,8 +425,12 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 
 		if len(body) > 0 {
 			// Intentamos hacer Unmarshal en un mapa para facilitar el acceso por nombre de campo
+			// Si falla (por ejemplo, si es XML), simplemente continuamos sin requestData
+			// Las funciones de aleatorización seguirán funcionando desde el caché
 			if err := json.Unmarshal(body, &requestData); err != nil {
-				return "", fmt.Errorf("error parsing request JSON: %w", err)
+				// Si no es JSON válido (puede ser XML u otro formato), simplemente continuamos
+				// sin requestData. Las funciones de aleatorización usarán el caché compartido.
+				requestData = make(map[string]interface{})
 			}
 		}
 	}
@@ -403,6 +448,40 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 	}
 	requestData["Query"] = queryParams
 
+	// Obtener o crear el mapa de valores aleatorios compartidos
+	// Usar un ID de transacción para compartir valores entre diferentes requests
+	transactionID := c.GetHeader("X-Transaction-ID")
+	if transactionID == "" {
+		// Si no hay ID de transacción, generar uno nuevo
+		transactionID = uuid.New().String()
+		c.Header("X-Transaction-ID", transactionID)
+	}
+
+	// Obtener o crear el mapa de valores aleatorios para esta transacción
+	randomCacheMutex.Lock()
+	var randomValues map[string]interface{}
+	if val, exists := randomCache[transactionID]; exists {
+		randomValues = val
+	} else {
+		randomValues = make(map[string]interface{})
+		randomCache[transactionID] = randomValues
+		// Limpiar el caché después de 5 minutos para evitar memory leaks
+		go func(id string) {
+			time.Sleep(5 * time.Minute)
+			randomCacheMutex.Lock()
+			delete(randomCache, id)
+			randomCacheMutex.Unlock()
+		}(transactionID)
+	}
+	randomCacheMutex.Unlock()
+
+	// También almacenar en el contexto de Gin para acceso rápido
+	c.Set("randomValues", randomValues)
+	c.Set("transactionID", transactionID)
+
+	// Agregar los valores aleatorios al contexto del template
+	requestData["Random"] = randomValues
+
 	// Create template with custom functions (incluyendo randInt y now que devuelve time.Time)
 	tmpl, err := template.New("response").Funcs(template.FuncMap{
 		"toJson": func(v interface{}) string {
@@ -416,11 +495,114 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 		"now": func() time.Time {
 			return time.Now()
 		},
-		// Agrega la función randInt necesaria para generar números aleatorios
+		// Agrega la función randInt necesaria para generar números aleatorios (con caché)
 		"randInt": func(min, max int) int {
-			// Nota: La siembra de rand debería idealmente hacerse una sola vez al inicio del programa.
+			key := fmt.Sprintf("randInt_%d_%d", min, max)
+			if val, exists := randomValues[key]; exists {
+				return val.(int)
+			}
 			rand.Seed(time.Now().UnixNano())
-			return rand.Intn(max-min) + min
+			value := rand.Intn(max-min) + min
+			randomValues[key] = value
+			return value
+		},
+		// Genera un string numérico aleatorio de longitud especificada (con caché)
+		"randNumericString": func(length int) string {
+			key := fmt.Sprintf("randNumericString_%d", length)
+			if val, exists := randomValues[key]; exists {
+				return val.(string)
+			}
+			rand.Seed(time.Now().UnixNano())
+			digits := "0123456789"
+			result := make([]byte, length)
+			for i := range result {
+				result[i] = digits[rand.Intn(len(digits))]
+			}
+			value := string(result)
+			randomValues[key] = value
+			return value
+		},
+		// Genera un nombre aleatorio (nombre + apellido) (con caché)
+		"randName": func() string {
+			key := "randName"
+			if val, exists := randomValues[key]; exists {
+				return val.(string)
+			}
+			rand.Seed(time.Now().UnixNano())
+			firstNames := []string{"Kathryn", "Rebecca", "John", "Maria", "Carlos", "Ana", "Luis", "Patricia", "Roberto", "Laura", "David", "Sofia", "Michael", "Isabella", "James", "Emily", "William", "Olivia", "Richard", "Emma"}
+			lastNames := []string{"Schmitt", "Anderson", "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez", "Wilson", "Anderson", "Thomas", "Taylor", "Moore"}
+			value := firstNames[rand.Intn(len(firstNames))] + " " + lastNames[rand.Intn(len(lastNames))]
+			randomValues[key] = value
+			return value
+		},
+		// Genera un ID venezolano aleatorio (formato: Letra + números) (con caché)
+		"randVenezuelanID": func() string {
+			key := "randVenezuelanID"
+			if val, exists := randomValues[key]; exists {
+				return val.(string)
+			}
+			rand.Seed(time.Now().UnixNano())
+			letters := "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+			letter := string(letters[rand.Intn(len(letters))])
+			digits := "0123456789"
+			result := make([]byte, 8)
+			for i := range result {
+				result[i] = digits[rand.Intn(len(digits))]
+			}
+			value := letter + string(result)
+			randomValues[key] = value
+			return value
+		},
+		// Genera un número de cuenta aleatorio (formato: código banco + números) (con caché)
+		"randAccount": func(bankCode string, length int) string {
+			key := fmt.Sprintf("randAccount_%s_%d", bankCode, length)
+			if val, exists := randomValues[key]; exists {
+				return val.(string)
+			}
+			rand.Seed(time.Now().UnixNano())
+			digits := "0123456789"
+			result := make([]byte, length)
+			for i := range result {
+				result[i] = digits[rand.Intn(len(digits))]
+			}
+			value := bankCode + string(result)
+			randomValues[key] = value
+			return value
+		},
+		// Genera un mensaje aleatorio (con caché)
+		"randMessage": func() string {
+			key := "randMessage"
+			if val, exists := randomValues[key]; exists {
+				return val.(string)
+			}
+			rand.Seed(time.Now().UnixNano())
+			messages := []string{"PRUEBA ENVIO", "TRANSFERENCIA", "PAGO SERVICIO", "ABONO CUENTA", "DEBITO AUTOMATICO", "CREDITO AUTOMATICO", "TRANSACCION PRUEBA", "OPERACION TEST"}
+			value := messages[rand.Intn(len(messages))]
+			randomValues[key] = value
+			return value
+		},
+		// Genera un string alfanumérico aleatorio
+		"randString": func(length int) string {
+			rand.Seed(time.Now().UnixNano())
+			chars := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+			result := make([]byte, length)
+			for i := range result {
+				result[i] = chars[rand.Intn(len(chars))]
+			}
+			return string(result)
+		},
+		// Genera un valor aleatorio de una lista de opciones
+		"randChoice": func(choices ...string) string {
+			if len(choices) == 0 {
+				return ""
+			}
+			rand.Seed(time.Now().UnixNano())
+			return choices[rand.Intn(len(choices))]
+		},
+		// Genera un valor decimal aleatorio
+		"randFloat": func(min, max float64) float64 {
+			rand.Seed(time.Now().UnixNano())
+			return min + rand.Float64()*(max-min)
 		},
 		// Genera un valor UTF-8 inválido o válido según query param
 		// Si existe query param "utf8_type", genera UTF-8 inválido del tipo especificado
