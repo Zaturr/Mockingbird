@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -414,6 +415,7 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 	// Parse request body to extract data for template variables
 	// Utilizamos map[string]interface{} para que las propiedades del JSON (como .Amount) sean accesibles
 	var requestData map[string]interface{}
+	var requestBodyXML string
 	if c.Request.Body != nil {
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
@@ -425,12 +427,18 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 
 		if len(body) > 0 {
 			// Intentamos hacer Unmarshal en un mapa para facilitar el acceso por nombre de campo
-			// Si falla (por ejemplo, si es XML), simplemente continuamos sin requestData
-			// Las funciones de aleatorización seguirán funcionando desde el caché
+			// Si falla (por ejemplo, si es XML), intentamos parsear como XML
 			if err := json.Unmarshal(body, &requestData); err != nil {
-				// Si no es JSON válido (puede ser XML u otro formato), simplemente continuamos
-				// sin requestData. Las funciones de aleatorización usarán el caché compartido.
-				requestData = make(map[string]interface{})
+				// Si no es JSON válido, intentar parsear como XML
+				contentType := c.GetHeader("Content-Type")
+				if strings.Contains(contentType, "xml") || strings.Contains(string(body), "<?xml") || strings.Contains(string(body), "<") {
+					// Guardar el body XML como string para extracción posterior
+					requestBodyXML = string(body)
+					requestData = make(map[string]interface{})
+				} else {
+					// Si no es JSON ni XML, simplemente continuamos sin requestData
+					requestData = make(map[string]interface{})
+				}
 			}
 		}
 	}
@@ -491,6 +499,18 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 			}
 			return string(jsonBytes)
 		},
+		// Función helper para valores por defecto
+		"default": func(value, defaultValue interface{}) interface{} {
+			if value == nil {
+				return defaultValue
+			}
+			if str, ok := value.(string); ok && str == "" {
+				return defaultValue
+			}
+			return value
+		},
+		// Función helper para printf
+		"printf": fmt.Sprintf,
 		// Devuelve un objeto time.Time para que la plantilla pueda llamar a .Format
 		"now": func() time.Time {
 			return time.Now()
@@ -628,6 +648,485 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 		// Función helper para obtener query param desde el template
 		"query": func(key string) string {
 			return c.Query(key)
+		},
+		// Función helper para extraer valores del JSON del request
+		// Uso: {{ jsonValue "PmtInf.0.Dbtr.Nm" }} o {{ jsonValue "PmtInf.0.Dbtr.Id" }}
+		"jsonValue": func(path string) string {
+			if requestData == nil {
+				return ""
+			}
+
+			// Navegar por la ruta del JSON (ej: "PmtInf.0.Dbtr.Nm")
+			// Primero buscar en CstmrCdtTrfInitn si existe
+			var current interface{} = requestData
+			if cstmr, ok := requestData["CstmrCdtTrfInitn"].(map[string]interface{}); ok {
+				current = cstmr
+			}
+
+			parts := strings.Split(path, ".")
+			for _, part := range parts {
+				switch v := current.(type) {
+				case map[string]interface{}:
+					if val, ok := v[part]; ok {
+						current = val
+					} else {
+						return ""
+					}
+				case []interface{}:
+					// Si es un array, intentar convertir el índice
+					if idx, err := strconv.Atoi(part); err == nil && idx >= 0 && idx < len(v) {
+						current = v[idx]
+					} else {
+						return ""
+					}
+				default:
+					return ""
+				}
+			}
+
+			// Convertir el valor final a string
+			if str, ok := current.(string); ok {
+				return str
+			}
+			if num, ok := current.(float64); ok {
+				return fmt.Sprintf("%.0f", num)
+			}
+			if num, ok := current.(int); ok {
+				return strconv.Itoa(num)
+			}
+
+			return ""
+		},
+		// Función helper para extraer valores del JSON con valor por defecto
+		// Uso: {{ jsonValueOr "PmtInf.0.Dbtr.Nm" "Default Name" }}
+		"jsonValueOr": func(path string, defaultValue string) string {
+			value := ""
+			if requestData != nil {
+				// Navegar por la ruta del JSON
+				var current interface{} = requestData
+				if cstmr, ok := requestData["CstmrCdtTrfInitn"].(map[string]interface{}); ok {
+					current = cstmr
+				}
+
+				parts := strings.Split(path, ".")
+				for _, part := range parts {
+					switch v := current.(type) {
+					case map[string]interface{}:
+						if val, ok := v[part]; ok {
+							current = val
+						} else {
+							return defaultValue
+						}
+					case []interface{}:
+						if idx, err := strconv.Atoi(part); err == nil && idx >= 0 && idx < len(v) {
+							current = v[idx]
+						} else {
+							return defaultValue
+						}
+					default:
+						return defaultValue
+					}
+				}
+
+				// Convertir el valor final a string
+				if str, ok := current.(string); ok {
+					value = str
+				} else if num, ok := current.(float64); ok {
+					value = fmt.Sprintf("%.0f", num)
+				} else if num, ok := current.(int); ok {
+					value = strconv.Itoa(num)
+				}
+			}
+
+			if value == "" {
+				return defaultValue
+			}
+			return value
+		},
+		// Función helper para obtener EndToEndId del JSON o generar uno
+		"endToEndId": func() string {
+			if requestData != nil {
+				if cstmr, ok := requestData["CstmrCdtTrfInitn"].(map[string]interface{}); ok {
+					if pmtInf, ok := cstmr["PmtInf"].([]interface{}); ok && len(pmtInf) > 0 {
+						if pmtInf0, ok := pmtInf[0].(map[string]interface{}); ok {
+							if endToEndId, ok := pmtInf0["EndToEndId"].(string); ok && endToEndId != "" {
+								return endToEndId
+							}
+						}
+					}
+				}
+			}
+			// Generar usando randNumericString existente
+			key := fmt.Sprintf("randNumericString_8")
+			var randomPart string
+			if val, exists := randomValues[key]; exists {
+				randomPart = val.(string)
+			} else {
+				rand.Seed(time.Now().UnixNano())
+				digits := "0123456789"
+				result := make([]byte, 8)
+				for i := range result {
+					result[i] = digits[rand.Intn(len(digits))]
+				}
+				randomPart = string(result)
+				randomValues[key] = randomPart
+			}
+			return "0114" + time.Now().Format("20060102150405") + randomPart
+		},
+		// Función helper para obtener TxId del JSON o generar uno de 30 dígitos
+		"txId": func() string {
+			// Intentar obtener del JSON primero
+			if requestData != nil {
+				if cstmr, ok := requestData["CstmrCdtTrfInitn"].(map[string]interface{}); ok {
+					if pmtInf, ok := cstmr["PmtInf"].([]interface{}); ok && len(pmtInf) > 0 {
+						if pmtInf0, ok := pmtInf[0].(map[string]interface{}); ok {
+							// Obtener DbtrAgt como código de banco
+							bankCode := "0001"
+							if dbtrAgt, ok := pmtInf0["DbtrAgt"].(string); ok && dbtrAgt != "" {
+								bankCode = dbtrAgt
+							}
+							// Si hay TxId en el JSON, usarlo
+							if txId, ok := pmtInf0["TxId"].(string); ok && txId != "" {
+								// Asegurar que tenga 30 dígitos
+								if len(txId) < 30 {
+									return strings.Repeat("0", 30-len(txId)) + txId
+								} else if len(txId) > 30 {
+									return txId[len(txId)-30:]
+								}
+								return txId
+							}
+							// Generar TxId de 30 dígitos: código_banco (4) + fecha/hora (14) + aleatorios (12)
+							bankCodePadded := bankCode
+							if len(bankCode) > 4 {
+								bankCodePadded = bankCode[:4]
+							} else if len(bankCode) < 4 {
+								bankCodePadded = strings.Repeat("0", 4-len(bankCode)) + bankCode
+							}
+							// Generar parte aleatoria
+							key := fmt.Sprintf("randNumericString_12")
+							var randomPart string
+							if val, exists := randomValues[key]; exists {
+								randomPart = val.(string)
+							} else {
+								rand.Seed(time.Now().UnixNano())
+								digits := "0123456789"
+								result := make([]byte, 12)
+								for i := range result {
+									result[i] = digits[rand.Intn(len(digits))]
+								}
+								randomPart = string(result)
+								randomValues[key] = randomPart
+							}
+							return bankCodePadded + time.Now().Format("20060102150405") + randomPart
+						}
+					}
+				}
+			}
+			// Fallback: generar uno de 30 dígitos
+			key := fmt.Sprintf("randNumericString_12")
+			var randomPart string
+			if val, exists := randomValues[key]; exists {
+				randomPart = val.(string)
+			} else {
+				rand.Seed(time.Now().UnixNano())
+				digits := "0123456789"
+				result := make([]byte, 12)
+				for i := range result {
+					result[i] = digits[rand.Intn(len(digits))]
+				}
+				randomPart = string(result)
+				randomValues[key] = randomPart
+			}
+			return "0001" + time.Now().Format("20060102150405") + randomPart
+		},
+		// Función helper para obtener OrgnlTxId (30 dígitos) - mismo formato que TxId
+		"orgnlTxId": func() string {
+			// Reutilizar la lógica de txId directamente
+			if requestData != nil {
+				if cstmr, ok := requestData["CstmrCdtTrfInitn"].(map[string]interface{}); ok {
+					if pmtInf, ok := cstmr["PmtInf"].([]interface{}); ok && len(pmtInf) > 0 {
+						if pmtInf0, ok := pmtInf[0].(map[string]interface{}); ok {
+							bankCode := "0001"
+							if dbtrAgt, ok := pmtInf0["DbtrAgt"].(string); ok && dbtrAgt != "" {
+								bankCode = dbtrAgt
+							}
+							if txId, ok := pmtInf0["TxId"].(string); ok && txId != "" {
+								if len(txId) < 30 {
+									return strings.Repeat("0", 30-len(txId)) + txId
+								} else if len(txId) > 30 {
+									return txId[len(txId)-30:]
+								}
+								return txId
+							}
+							bankCodePadded := bankCode
+							if len(bankCode) > 4 {
+								bankCodePadded = bankCode[:4]
+							} else if len(bankCode) < 4 {
+								bankCodePadded = strings.Repeat("0", 4-len(bankCode)) + bankCode
+							}
+							key := fmt.Sprintf("randNumericString_12")
+							var randomPart string
+							if val, exists := randomValues[key]; exists {
+								randomPart = val.(string)
+							} else {
+								rand.Seed(time.Now().UnixNano())
+								digits := "0123456789"
+								result := make([]byte, 12)
+								for i := range result {
+									result[i] = digits[rand.Intn(len(digits))]
+								}
+								randomPart = string(result)
+								randomValues[key] = randomPart
+							}
+							return bankCodePadded + time.Now().Format("20060102150405") + randomPart
+						}
+					}
+				}
+			}
+			key := fmt.Sprintf("randNumericString_12")
+			var randomPart string
+			if val, exists := randomValues[key]; exists {
+				randomPart = val.(string)
+			} else {
+				rand.Seed(time.Now().UnixNano())
+				digits := "0123456789"
+				result := make([]byte, 12)
+				for i := range result {
+					result[i] = digits[rand.Intn(len(digits))]
+				}
+				randomPart = string(result)
+				randomValues[key] = randomPart
+			}
+			return "0001" + time.Now().Format("20060102150405") + randomPart
+		},
+		// Función helper para obtener OrgnlEndToEndId
+		"orgnlEndToEndId": func() string {
+			// Reutilizar la lógica de endToEndId directamente
+			if requestData != nil {
+				if cstmr, ok := requestData["CstmrCdtTrfInitn"].(map[string]interface{}); ok {
+					if pmtInf, ok := cstmr["PmtInf"].([]interface{}); ok && len(pmtInf) > 0 {
+						if pmtInf0, ok := pmtInf[0].(map[string]interface{}); ok {
+							if endToEndId, ok := pmtInf0["EndToEndId"].(string); ok && endToEndId != "" {
+								return endToEndId
+							}
+						}
+					}
+				}
+			}
+			key := fmt.Sprintf("randNumericString_8")
+			var randomPart string
+			if val, exists := randomValues[key]; exists {
+				randomPart = val.(string)
+			} else {
+				rand.Seed(time.Now().UnixNano())
+				digits := "0123456789"
+				result := make([]byte, 8)
+				for i := range result {
+					result[i] = digits[rand.Intn(len(digits))]
+				}
+				randomPart = string(result)
+				randomValues[key] = randomPart
+			}
+			return "0114" + time.Now().Format("20060102150405") + randomPart
+		},
+		// Función helper para obtener OrgnlMsgId del JSON o generar uno
+		"orgnlMsgId": func() string {
+			if requestData != nil {
+				if cstmr, ok := requestData["CstmrCdtTrfInitn"].(map[string]interface{}); ok {
+					if grpHdr, ok := cstmr["GrpHdr"].(map[string]interface{}); ok {
+						if msgId, ok := grpHdr["MsgId"].(string); ok && msgId != "" {
+							return msgId
+						}
+					}
+				}
+			}
+			// Generar uno: código_banco + fecha/hora + aleatorios
+			bankCode := "0172"
+			if requestData != nil {
+				if cstmr, ok := requestData["CstmrCdtTrfInitn"].(map[string]interface{}); ok {
+					if pmtInf, ok := cstmr["PmtInf"].([]interface{}); ok && len(pmtInf) > 0 {
+						if pmtInf0, ok := pmtInf[0].(map[string]interface{}); ok {
+							if cdtrAgt, ok := pmtInf0["CdtrAgt"].(string); ok && cdtrAgt != "" {
+								bankCode = cdtrAgt
+							}
+						}
+					}
+				}
+			}
+			if len(bankCode) > 4 {
+				bankCode = bankCode[:4]
+			} else if len(bankCode) < 4 {
+				bankCode = strings.Repeat("0", 4-len(bankCode)) + bankCode
+			}
+			key := fmt.Sprintf("randNumericString_8")
+			var randomPart string
+			if val, exists := randomValues[key]; exists {
+				randomPart = val.(string)
+			} else {
+				rand.Seed(time.Now().UnixNano())
+				digits := "0123456789"
+				result := make([]byte, 8)
+				for i := range result {
+					result[i] = digits[rand.Intn(len(digits))]
+				}
+				randomPart = string(result)
+				randomValues[key] = randomPart
+			}
+			return bankCode + "01" + time.Now().Format("20060102150405") + randomPart
+		},
+		// Función helper para extraer valores del XML del request
+		// Uso: {{ xmlValue "Id" }} o {{ xmlValue "Dbtr.Id" }} para rutas anidadas
+		"xmlValue": func(path string) string {
+			if requestBodyXML == "" {
+				return ""
+			}
+
+			// Si la ruta contiene puntos, buscar el último elemento (ej: "Dbtr.Id" -> buscar "Id" dentro de "Dbtr")
+			parts := strings.Split(path, ".")
+			tagName := parts[len(parts)-1]
+
+			// Crear expresión regular para encontrar el tag y su contenido
+			// Buscar <TagName>valor</TagName> o <TagName atributos>valor</TagName>
+			pattern := fmt.Sprintf(`<%s(?:\s[^>]*)?>([^<]*)</%s>`, regexp.QuoteMeta(tagName), regexp.QuoteMeta(tagName))
+			re := regexp.MustCompile(pattern)
+
+			// Si hay una ruta anidada, buscar primero el tag padre
+			xmlToSearch := requestBodyXML
+			if len(parts) > 1 {
+				// Buscar el tag padre y usar solo ese fragmento
+				parentTag := parts[len(parts)-2]
+				parentPattern := fmt.Sprintf(`<%s(?:\s[^>]*)?>([\s\S]*?)</%s>`, regexp.QuoteMeta(parentTag), regexp.QuoteMeta(parentTag))
+				parentRe := regexp.MustCompile(parentPattern)
+				matches := parentRe.FindStringSubmatch(requestBodyXML)
+				if len(matches) > 1 {
+					xmlToSearch = matches[1]
+				}
+			}
+
+			matches := re.FindStringSubmatch(xmlToSearch)
+			if len(matches) > 1 {
+				return strings.TrimSpace(matches[1])
+			}
+
+			return ""
+		},
+		// Función helper para construir ClrSysRef con formato: VES + código_banco (6) + TEST + TxId (30 dígitos)
+		// Uso: {{ clrSysRef "000101" }} o {{ clrSysRef "0114" }}
+		"clrSysRef": func(bankCode string) string {
+			// Extraer el TxId del request (primero intentar JSON, luego XML)
+			txId := ""
+
+			// Intentar extraer del JSON primero
+			if requestData != nil {
+				// Buscar en PmtInf[0].TxId o similar
+				if pmtInf, ok := requestData["CstmrCdtTrfInitn"].(map[string]interface{}); ok {
+					if pmtInfArr, ok := pmtInf["PmtInf"].([]interface{}); ok && len(pmtInfArr) > 0 {
+						if pmtInf0, ok := pmtInfArr[0].(map[string]interface{}); ok {
+							if txIdVal, ok := pmtInf0["TxId"].(string); ok && txIdVal != "" {
+								txId = txIdVal
+							}
+						}
+					}
+				}
+			}
+
+			// Si no se encontró en JSON, intentar XML
+			if txId == "" && requestBodyXML != "" {
+				// Buscar TxId dentro de PmtId
+				pmtIdPattern := regexp.MustCompile(`<PmtId(?:\s[^>]*)?>([\s\S]*?)</PmtId>`)
+				pmtIdMatches := pmtIdPattern.FindStringSubmatch(requestBodyXML)
+				if len(pmtIdMatches) > 1 {
+					txIdPattern := regexp.MustCompile(`<TxId(?:\s[^>]*)?>([^<]*)</TxId>`)
+					txIdMatches := txIdPattern.FindStringSubmatch(pmtIdMatches[1])
+					if len(txIdMatches) > 1 {
+						txId = strings.TrimSpace(txIdMatches[1])
+					}
+				}
+			}
+
+			// Si no se encontró TxId, generar uno de 30 dígitos como fallback
+			if txId == "" {
+				// Usar el mismo formato que en el template: código_banco (4) + fecha/hora (14) + aleatorios (12)
+				// Usar el código del banco proporcionado o "0001" por defecto
+				codePrefix := bankCode
+				if len(bankCode) > 4 {
+					codePrefix = bankCode[:4]
+				} else if len(bankCode) < 4 {
+					codePrefix = strings.Repeat("0", 4-len(bankCode)) + bankCode
+				}
+
+				dateTimeStr := time.Now().Format("20060102150405") // 14 dígitos
+				// Generar 12 dígitos aleatorios para completar 30
+				rand.Seed(time.Now().UnixNano())
+				digits := "0123456789"
+				randomPart := make([]byte, 12)
+				for i := range randomPart {
+					randomPart[i] = digits[rand.Intn(len(digits))]
+				}
+				txId = codePrefix + dateTimeStr + string(randomPart) // 4 + 14 + 12 = 30 dígitos
+			}
+
+			// Asegurar que el código del banco tenga 6 dígitos (rellenar con ceros a la izquierda)
+			bankCodePadded := bankCode
+			if len(bankCode) < 6 {
+				bankCodePadded = strings.Repeat("0", 6-len(bankCode)) + bankCode
+			} else if len(bankCode) > 6 {
+				bankCodePadded = bankCode[len(bankCode)-6:]
+			}
+
+			// Construir ClrSysRef: VES + código_banco (6) + TEST + TxId (exactamente 33 caracteres - Hard33Text)
+			// Formato: "VES" (3) + código_banco (6) + "TEST" (4) + TxId (20) = 33 caracteres
+			// Del ejemplo: "VES000101TEST00000428119747823414" = 33 caracteres
+			// - "VES" = 3
+			// - "000101" = 6
+			// - "TEST" = 4
+			// - "00000428119747823414" = 20
+			// Total = 33
+
+			// Asegurar que el TxId tenga exactamente 20 dígitos para que el total sea 33
+			// Formato ClrSysRef: "VES" (3) + código_banco (6) + "TEST" (4) + TxId (20) = 33 caracteres
+			// Del ejemplo: "VES000101TEST00000428119747823414"
+			// El TxId de 30 dígitos se trunca a los últimos 20 para ClrSysRef
+			txIdPadded := txId
+			if len(txId) == 0 {
+				// Si no hay TxId, generar uno de 20 dígitos (fecha/hora 14 + aleatorios 6)
+				dateTimeStr := time.Now().Format("20060102150405") // 14 dígitos
+				rand.Seed(time.Now().UnixNano())
+				digits := "0123456789"
+				randomPart := make([]byte, 6)
+				for i := range randomPart {
+					randomPart[i] = digits[rand.Intn(len(digits))]
+				}
+				txIdPadded = dateTimeStr + string(randomPart) // 14 + 6 = 20 dígitos
+			} else {
+				// Siempre tomar exactamente los últimos 20 dígitos del TxId
+				// Si tiene menos de 20, rellenar con ceros a la izquierda
+				// Si tiene 20 o más, tomar los últimos 20
+				if len(txId) < 20 {
+					txIdPadded = strings.Repeat("0", 20-len(txId)) + txId
+				} else {
+					// Tomar los últimos 20 dígitos (funciona para 20, 22, 30, etc.)
+					txIdPadded = txId[len(txId)-20:]
+				}
+			}
+
+			// Asegurar que txIdPadded tenga exactamente 20 dígitos
+			if len(txIdPadded) != 20 {
+				if len(txIdPadded) < 20 {
+					txIdPadded = strings.Repeat("0", 20-len(txIdPadded)) + txIdPadded
+				} else {
+					txIdPadded = txIdPadded[len(txIdPadded)-20:]
+				}
+			}
+
+			// Construir ClrSysRef: VES (3) + bankCodePadded (6) + TEST (4) + txIdPadded (20) = 33
+			clrSysRef := "VES" + bankCodePadded + "TEST" + txIdPadded
+			// Validación final: debe ser exactamente 33 caracteres (Hard33Text)
+			// Si excede, truncar a 33 (esto no debería pasar si todo está correcto)
+			if len(clrSysRef) > 33 {
+				clrSysRef = clrSysRef[:33]
+			}
+			return clrSysRef
 		},
 	}).Parse(responseTemplate)
 
