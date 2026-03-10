@@ -611,6 +611,10 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 			}
 			return string(result)
 		},
+		// Genera un UUID v4 para trace_id u otros identificadores
+		"uuid": func() string {
+			return uuid.New().String()
+		},
 		// Genera un valor aleatorio de una lista de opciones
 		"randChoice": func(choices ...string) string {
 			if len(choices) == 0 {
@@ -1074,19 +1078,6 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 				bankCodePadded = bankCode[len(bankCode)-6:]
 			}
 
-			// Construir ClrSysRef: VES + código_banco (6) + TEST + TxId (exactamente 33 caracteres - Hard33Text)
-			// Formato: "VES" (3) + código_banco (6) + "TEST" (4) + TxId (20) = 33 caracteres
-			// Del ejemplo: "VES000101TEST00000428119747823414" = 33 caracteres
-			// - "VES" = 3
-			// - "000101" = 6
-			// - "TEST" = 4
-			// - "00000428119747823414" = 20
-			// Total = 33
-
-			// Asegurar que el TxId tenga exactamente 20 dígitos para que el total sea 33
-			// Formato ClrSysRef: "VES" (3) + código_banco (6) + "TEST" (4) + TxId (20) = 33 caracteres
-			// Del ejemplo: "VES000101TEST00000428119747823414"
-			// El TxId de 30 dígitos se trunca a los últimos 20 para ClrSysRef
 			txIdPadded := txId
 			if len(txId) == 0 {
 				// Si no hay TxId, generar uno de 20 dígitos (fecha/hora 14 + aleatorios 6)
@@ -1097,11 +1088,9 @@ func (h *Handler) processResponseTemplate(c *gin.Context, responseTemplate strin
 				for i := range randomPart {
 					randomPart[i] = digits[rand.Intn(len(digits))]
 				}
-				txIdPadded = dateTimeStr + string(randomPart) // 14 + 6 = 20 dígitos
+				txIdPadded = dateTimeStr + string(randomPart)
 			} else {
-				// Siempre tomar exactamente los últimos 20 dígitos del TxId
-				// Si tiene menos de 20, rellenar con ceros a la izquierda
-				// Si tiene 20 o más, tomar los últimos 20
+
 				if len(txId) < 20 {
 					txIdPadded = strings.Repeat("0", 20-len(txId)) + txId
 				} else {

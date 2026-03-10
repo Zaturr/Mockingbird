@@ -1,0 +1,229 @@
+http:
+    servers:
+        - listen: 7755
+          logger: true
+          name: "GATEWAY"
+          logger_path: "./log/main"
+          version: "0.0.1"
+          location:
+            - path: /api/v1/transaction
+              method: POST 
+              headers:
+                Content-type: application/json
+              body: 'Recibido satisfactoriamente'
+              status_code: 200
+              async:
+                - url: https://desa.sygateway.sypago.net/api/v1/transaction
+                  method: POST
+                  headers:
+                    Content-type: application/json
+                  body: |
+                    {
+                       "$schema": "http://json-schema.org/draft-07/schema#",
+                       "title": "TransactionSchema",
+                       "type": "object",
+                       "required": [
+                         "UserId",
+                         "UserUniqueId",
+                         "UserReferenceId",
+                         "CreationDate",
+                         "Amount",
+                         "IssuingUser",
+                         "ReceivingUser"
+                       ],
+                       "properties": {
+                         "UserId": { "type": "string", "format": "uuid" },
+                         "UserUniqueId": { "type": "string" },
+                         "UserReferenceId": { "type": "string" },
+                         "UserGroupId": { "type": "string" },
+                         "CreationDate": { "type": "string", "format": "date-time" },
+                         "TraceId": { "type": "string" },
+                         "TransactionId": { "type": "string" },
+                         "SyPagoCreationChannel": { "type": "string" },
+                         "SyPagoAcceptanceChannel": { "type": "string" },
+                         "SypagoInitDate": { "type": "string", "format": "date-time" },
+                         "SypagoProcessDate": { "type": "string", "format": "date-time" },
+                         "Product": { "type": "string" },
+                         "SubProduct": { "type": "string" },
+                         "Amount": {
+                           "type": "object",
+                           "required": ["Ccy", "Amt"],
+                           "properties": {
+                             "Ccy": { "type": "string", "minLength": 3, "maxLength": 3 },
+                             "Amt": { "type": "number" },
+                             "Commission": { "type": "number" }
+                           }
+                         },
+                         "ProductSypago": { "type": "string" },
+                         "SubProductSypago": { "type": "string" },
+                         "ApprovalAgent": { "type": "string" },
+                         "IssuingAgent": { "type": "string" },
+                         "IssuingUser": {
+                           "type": "object",
+                           "properties": {
+                             "UserId": { "type": "string" },
+                             "LinkUserId": { "type": "string" },
+                             "Account": {
+                               "type": "object",
+                               "properties": {
+                                 "Tp": { "type": "string" },
+                                 "Id": { "type": "string" }
+                               }
+                             },
+                             "Document": {
+                               "type": "object",
+                               "properties": {
+                                 "Nm": { "type": "string" },
+                                 "Id": { "type": "string" },
+                                 "SchmeNm": { "type": "string" }
+                               }
+                             },
+                             "Concept": { "type": "string" }
+                           }
+                         },
+                         "ReceivingAgent": { "type": "string" },
+                         "ReceivingUser": {
+                           "type": "object",
+                           "properties": {
+                             "UserId": { "type": "string" },
+                             "LinkUserId": { "type": "string" },
+                             "Account": {
+                               "type": "object",
+                               "properties": {
+                                 "Tp": { "type": "string" },
+                                 "Id": { "type": "string" }
+                               }
+                             },
+                             "Document": {
+                               "type": "object",
+                               "properties": {
+                                 "Nm": { "type": "string" },
+                                 "Id": { "type": "string" },
+                                 "SchmeNm": { "type": "string" }
+                               }
+                             },
+                             "Concept": { "type": "string" }
+                           }
+                         },
+                         "PayKey": { "type": "string" },
+                         "RfrdDocInf": {
+                           "type": "array",
+                           "items": {
+                             "type": "object",
+                             "properties": {
+                               "CdOrPrtry": { "type": "string" },
+                               "Nb": { "type": "string" },
+                               "RltdDt": { "type": "string", "format": "date" },
+                               "RjctDt": { "type": "string", "format": "date" },
+                               "DuePyblAmt": {
+                                 "type": "object",
+                                 "properties": {
+                                   "Ccy": { "type": "string" },
+                                   "Amt": { "type": "number" }
+                                 }
+                               }
+                             }
+                           }
+                         }
+                       }
+                     }
+
+            - path: /api/v1/token/otp/generate
+              method: POST 
+              headers:
+                Content-type: application/json
+              body: 'Recibido satisfactoriamente'
+              status_code: 200
+              async:
+                - url: https://desa.sygateway.sypago.net/api/v1/token/otp/generate
+                  method: POST
+                  headers:
+                    Content-type: application/json
+                  body: |
+                    {
+                      "$schema": "http://json-schema.org/draft-07/schema#",
+                      "title": "AuthorizationRequestSchema",
+                      "type": "object",
+                      "required": ["AuthstnReq"],
+                      "properties": {
+                        "AuthstnReq": {
+                          "type": "object",
+                          "required": ["GrpHdr", "Initn"],
+                          "properties": {
+                            "GrpHdr": {
+                              "type": "object",
+                              "required": ["MsgId", "CreDtTm"],
+                              "properties": {
+                                "MsgId": { "type": "string" },
+                                "CreDtTm": { "type": "string", "format": "date-time" }
+                              }
+                            },
+                            "Initn": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "MndtRltdInf",
+                                  "Amount",
+                                  "DbtrAgt",
+                                  "DbtrAcct",
+                                  "Dbtr",
+                                  "CdtrAgt",
+                                  "Cdtr",
+                                  "CdtrAcct"
+                                ],
+                                "properties": {
+                                  "MndtRltdInf": {
+                                    "type": "object",
+                                    "properties": {
+                                      "LclInstrm": { "type": "string" },
+                                      "MndtId": { "type": "string" }
+                                    }
+                                  },
+                                  "Amount": {
+                                    "type": "object",
+                                    "required": ["Ccy", "Amt"],
+                                    "properties": {
+                                      "Ccy": { "type": "string", "minLength": 3, "maxLength": 3 },
+                                      "Amt": { "type": "number" }
+                                    }
+                                  },
+                                  "DbtrAgt": { "type": "string" },
+                                  "DbtrAcct": {
+                                    "type": "object",
+                                    "properties": {
+                                      "Tp": { "type": "string" },
+                                      "Id": { "type": "string" }
+                                    }
+                                  },
+                                  "Dbtr": {
+                                    "type": "object",
+                                    "properties": {
+                                      "Nm": { "type": "string" },
+                                      "Id": { "type": "string" },
+                                      "SchmeNm": { "type": "string" }
+                                    }
+                                  },
+                                  "CdtrAgt": { "type": "string" },
+                                  "Cdtr": {
+                                    "type": "object",
+                                    "properties": {
+                                      "Nm": { "type": "string" },
+                                      "Id": { "type": "string" },
+                                      "SchmeNm": { "type": "string" }
+                                    }
+                                  },
+                                  "CdtrAcct": {
+                                    "type": "object",
+                                    "properties": {
+                                      "Tp": { "type": "string" },
+                                      "Id": { "type": "string" }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }

@@ -38,3 +38,320 @@ http:
               body: 'Recibido satisfactoriamente'
               status_code: 202
 
+            
+
+            - path: /coresimf/api/v1/bcorec/cdinme/validar
+              method: POST 
+              headers:
+                Content-type: application/json
+              body: |
+                {
+                  "$schema": "http://json-schema.org/draft-07/schema#",
+                  "title": "Customer Credit Transfer Initiation Schema",
+                  "type": "object",
+                  "required": ["CstmrCdtTrfInitn"],
+                  "properties": {
+                    "CstmrCdtTrfInitn": {
+                      "type": "object",
+                      "required": ["GrpHdr", "PmtInf"],
+                      "properties": {
+                        "GrpHdr": {
+                          "type": "object",
+                          "required": ["MsgId", "CreDtTm", "NbOfTxs", "CtrlSum"],
+                          "properties": {
+                            "MsgId": { "type": "string" },
+                            "CreDtTm": { "type": "string", "format": "date-time" },
+                            "NbOfTxs": { "type": "integer" },
+                            "CtrlSum": {
+                              "type": "object",
+                              "properties": {
+                                "Ccy": { "type": "string", "minLength": 3, "maxLength": 3 },
+                                "Amt": { "type": "number" }
+                              }
+                            },
+                            "IntrBkSttlmDt": { "type": "string", "format": "date" },
+                            "LclInstrm": { "type": "string" },
+                            "Channel": { "type": "string" }
+                          }
+                        },
+                        "PmtInf": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": ["EndToEndId", "Amount", "Dbtr", "DbtrAcct", "Cdtr", "CdtrAcct"],
+                            "properties": {
+                              "RegId": { "type": "integer" },
+                              "EndToEndId": { "type": "string" },
+                              "ClrSysRef": { "type": "string" },
+                              "TxId": { "type": "string" },
+                              "Amount": {
+                                "type": "object",
+                                "properties": {
+                                  "Ccy": { "type": "string" },
+                                  "Amt": { "type": "number" }
+                                }
+                              },
+                              "Purp": { "type": "string" },
+                              "DbtrAgt": { "type": "string" },
+                              "Dbtr": { "$ref": "#/definitions/Party" },
+                              "DbtrAcct": { "$ref": "#/definitions/Account" },
+                              "CdtrAgt": { "type": "string" },
+                              "Cdtr": { "$ref": "#/definitions/Party" },
+                              "CdtrAcct": { "$ref": "#/definitions/Account" },
+                              "RmtInf": { "type": "string" }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "definitions": {
+                    "Party": {
+                      "type": "object",
+                      "properties": {
+                        "Nm": { "type": "string" },
+                        "Id": { "type": "string" },
+                        "SchmeNm": { "type": "string" }
+                      }
+                    },
+                    "Account": {
+                      "type": "object",
+                      "properties": {
+                        "Tp": { "type": "string" },
+                        "Id": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              response: |
+                {
+                  "CstmrPmtStsRpt": {
+                    "GrpHdr": {
+                      "MsgId": "NCCE01{{ now.Format "20060102150405" }}{{ randNumericString 8 }}",
+                      "CreDtTm": "{{ now.Format "2006-01-02T15:04:05.000000" }}"
+                    },
+                    "OrgnlGrpInfAndSts": {
+                      "OrgnlMsgId": "{{ jsonValueOr "GrpHdr.MsgId" "" }}",
+                      "OrgnlCreDtTm": "{{ jsonValueOr "GrpHdr.CreDtTm" (now.Format "2006-01-02T15:04:05.000000") }}",
+                      "OrgnlNbOfTxs": {{ jsonValueOr "GrpHdr.NbOfTxs" "1" }},
+                      "OrgnlCtrlSum": {
+                        "Ccy": "{{ jsonValueOr "GrpHdr.CtrlSum.Ccy" "VES" }}",
+                        "Amt": {{ jsonValueOr "GrpHdr.CtrlSum.Amt" "0" }}
+                      },
+                      "IntrBkSttlmDt": "{{ jsonValueOr "GrpHdr.IntrBkSttlmDt" (now.Format "2006-01-02") }}",
+                      "LclInstrm": "{{ jsonValueOr "GrpHdr.LclInstrm" "" }}"
+                    },
+                    "OrgnlPmtInfAndSts": [
+                      {
+                        "OrgnlRegId": {{ jsonValueOr "PmtInf.0.RegId" "0" }},
+                        "OrgnlEndToEndId": "{{ jsonValueOr "PmtInf.0.EndToEndId" "" }}",
+                        "OrgnlTxId": "{{ jsonValueOr "PmtInf.0.TxId" "" }}",
+                        "TxSts": "ACCP",
+                        "AccptncDtTm": "{{ now.Format "2006-01-02T15:04:05.000000" }}",
+                        "ClrSysRef": "{{ jsonValueOr "PmtInf.0.ClrSysRef" "" }}",
+                        "Amount": {
+                          "Ccy": "{{ jsonValueOr "PmtInf.0.Amount.Ccy" "VES" }}",
+                          "Amt": {{ jsonValueOr "PmtInf.0.Amount.Amt" "0" }}
+                        },
+                        "Purp": "{{ jsonValueOr "PmtInf.0.Purp" "" }}",
+                        "DbtrAgt": "{{ jsonValueOr "PmtInf.0.DbtrAgt" "" }}",
+                        "CdtrAgt": "{{ jsonValueOr "PmtInf.0.CdtrAgt" "" }}",
+                        "DbtrAcct": {
+                          "Tp": "{{ jsonValueOr "PmtInf.0.DbtrAcct.Tp" "" }}",
+                          "Id": "{{ jsonValueOr "PmtInf.0.DbtrAcct.Id" "" }}"
+                        },
+                        "CdtrAcct": {
+                          "Tp": "{{ jsonValueOr "PmtInf.0.CdtrAcct.Tp" "" }}",
+                          "Id": "{{ jsonValueOr "PmtInf.0.CdtrAcct.Id" "" }}"
+                        },
+                        "FctvlntrBkSttlmDt": "{{ now.Format "2006-01-02" }}",
+                        "FctvlntrBkSttlmNb": {{ randInt 1 10 }},
+                        "RmtInf": "{{ jsonValueOr "PmtInf.0.RmtInf" "" }}"
+                      }
+                    ]
+                  }
+                }
+              status_code: 200
+
+            - path: /coresimf/api/v1/bcorec/cdinme/liquidar
+              method: POST
+              headers:
+                Content-type: application/json
+              body: |
+                {
+                  "$schema": "http://json-schema.org/draft-07/schema#",
+                  "title": "Customer Payment Status Report Schema",
+                  "type": "object",
+                  "required": ["CstmrPmtStsRpt"],
+                  "properties": {
+                    "CstmrPmtStsRpt": {
+                      "type": "object",
+                      "required": ["GrpHdr", "OrgnlGrpInfAndSts", "OrgnlPmtInfAndSts"],
+                      "properties": {
+                        "GrpHdr": {
+                          "type": "object",
+                          "required": ["MsgId", "CreDtTm"],
+                          "properties": {
+                            "MsgId": { "type": "string" },
+                            "CreDtTm": { "type": "string", "format": "date-time" }
+                          }
+                        },
+                        "OrgnlGrpInfAndSts": {
+                          "type": "object",
+                          "required": ["OrgnlMsgId", "OrgnlCreDtTm"],
+                          "properties": {
+                            "OrgnlMsgId": { "type": "string" },
+                            "OrgnlCreDtTm": { "type": "string", "format": "date-time" },
+                            "OrgnlNbOfTxs": { "type": "integer" },
+                            "OrgnlCtrlSum": { "$ref": "#/definitions/Amount" },
+                            "IntrBkSttlmDt": { "type": "string", "format": "date" },
+                            "LclInstrm": { "type": "string" }
+                          }
+                        },
+                        "OrgnlPmtInfAndSts": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": ["OrgnlEndToEndId", "TxSts", "Amount"],
+                            "properties": {
+                              "OrgnlRegId": { "type": "integer" },
+                              "OrgnlEndToEndId": { "type": "string" },
+                              "AccptncDtTm": { "type": "string", "format": "date-time" },
+                              "ClrSysRef": { "type": "string" },
+                              "OrgnlTxId": { "type": "string" },
+                              "TxSts": {
+                                "type": "string",
+                                "description": "Estado de la transacción (ej. ACCP, RJCT, PDNG)"
+                              },
+                              "Rsn": { "type": "string" },
+                              "AddtlInf": { "type": "string" },
+                              "Amount": { "$ref": "#/definitions/Amount" },
+                              "Purp": { "type": "string" },
+                              "DbtrAgt": { "type": "string" },
+                              "CdtrAgt": { "type": "string" },
+                              "DbtrAcct": { "$ref": "#/definitions/Account" },
+                              "CdtrAcct": { "$ref": "#/definitions/Account" },
+                              "FctvlntrBkSttlmDt": { "type": "string", "format": "date" },
+                              "FctvlntrBkSttlmNb": { "type": "integer" },
+                              "RmtInf": { "type": "string" }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "definitions": {
+                    "Amount": {
+                      "type": "object",
+                      "required": ["Ccy", "Amt"],
+                      "properties": {
+                        "Ccy": { "type": "string", "pattern": "^[A-Z]{3}$" },
+                        "Amt": { "type": "number" }
+                      }
+                    },
+                    "Account": {
+                      "type": "object",
+                      "properties": {
+                        "Tp": { "type": "string" },
+                        "Id": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              response: 'Recibido satisfactoriamente'
+              status_code: 202
+
+
+            - path: /coresimf/api/v1/bcoemi/cdinme/liquidar
+              method: POST
+              headers:
+                Content-type: application/json
+              body: |
+                {
+                  "$schema": "http://json-schema.org/draft-07/schema#",
+                  "title": "ISO 20022 - Customer Payment Status Report (pain.002)",
+                  "type": "object",
+                  "required": ["CstmrPmtStsRpt"],
+                  "properties": {
+                    "CstmrPmtStsRpt": {
+                      "type": "object",
+                      "required": ["GrpHdr", "OrgnlGrpInfAndSts", "OrgnlPmtInfAndSts"],
+                      "properties": {
+                        "GrpHdr": {
+                          "type": "object",
+                          "required": ["MsgId", "CreDtTm"],
+                          "properties": {
+                            "MsgId": { "type": "string" },
+                            "CreDtTm": { "type": "string", "format": "date-time" }
+                          }
+                        },
+                        "OrgnlGrpInfAndSts": {
+                          "type": "object",
+                          "required": ["OrgnlMsgId", "OrgnlCreDtTm", "OrgnlNbOfTxs", "OrgnlCtrlSum"],
+                          "properties": {
+                            "OrgnlMsgId": { "type": "string" },
+                            "OrgnlCreDtTm": { "type": "string", "format": "date-time" },
+                            "OrgnlNbOfTxs": { "type": "integer", "minimum": 1 },
+                            "OrgnlCtrlSum": { "$ref": "#/definitions/Amount" },
+                            "IntrBkSttlmDt": { "type": "string", "format": "date" },
+                            "LclInstrm": { "type": "string" }
+                          }
+                        },
+                        "OrgnlPmtInfAndSts": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "object",
+                            "required": ["OrgnlEndToEndId", "TxSts", "Amount"],
+                            "properties": {
+                              "OrgnlRegId": { "type": "integer" },
+                              "OrgnlEndToEndId": { "type": "string" },
+                              "AccptncDtTm": { "type": "string", "format": "date-time" },
+                              "ClrSysRef": { "type": "string" },
+                              "OrgnlTxId": { "type": "string" },
+                              "TxSts": {
+                                "type": "string",
+                                "enum": ["ACCP", "RJCT", "PDNG", "ACSP", "PART"],
+                                "description": "Código de estado de la transacción"
+                              },
+                              "Rsn": { "type": "string" },
+                              "AddtlInf": { "type": "string" },
+                              "Amount": { "$ref": "#/definitions/Amount" },
+                              "Purp": { "type": "string" },
+                              "DbtrAgt": { "type": "string" },
+                              "CdtrAgt": { "type": "string" },
+                              "DbtrAcct": { "$ref": "#/definitions/Account" },
+                              "CdtrAcct": { "$ref": "#/definitions/Account" },
+                              "FctvlntrBkSttlmDt": { "type": "string", "format": "date" },
+                              "FctvlntrBkSttlmNb": { "type": "integer" },
+                              "RmtInf": { "type": "string" }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "definitions": {
+                    "Amount": {
+                      "type": "object",
+                      "required": ["Ccy", "Amt"],
+                      "properties": {
+                        "Ccy": { "type": "string", "pattern": "^[A-Z]{3}$" },
+                        "Amt": { "type": "number" }
+                      }
+                    },
+                    "Account": {
+                      "type": "object",
+                      "required": ["Tp", "Id"],
+                      "properties": {
+                        "Tp": { "type": "string" },
+                        "Id": { "type": "string", "pattern": "^[0-9]{20}$" }
+                      }
+                    }
+                  }
+                }
+              response: 'Recibido satisfactoriamente'
+              status_code: 202
+
+        
+
