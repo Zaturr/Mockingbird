@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/SOLUCIONESSYCOM/scribe"
 	"gopkg.in/yaml.v3"
 )
 
@@ -152,9 +153,18 @@ func GetConfigDir() string {
 	if configDir != "" {
 		return configDir
 	}
+	execPath, err := os.Executable()
+	if err != nil {
+		scribe.GetPreLogger().
+			Error(fmt.Sprintf("Load Services/Error al obtener la ruta del ejecutable: %v", err))
+		panic(err)
+	}
 
-	// Default to ./config
-	return "./config"
+	execPath = filepath.Dir(execPath)
+
+	configPath := filepath.Join(execPath, "config")
+
+	return configPath
 }
 
 // GetLogSettings returns the default logging configuration
